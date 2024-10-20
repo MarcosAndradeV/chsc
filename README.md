@@ -4,7 +4,7 @@ A programing language inspired by [Porth](https://gitlab.com/tsoding/porth).
 
 ## Goals
 
-- [ ] Stack-oriented but with a procedural-like syntax
+- [ ] Stack-oriented (maybe add option to use procedural style)
 - [ ] Compiled to Fasm Assembly
 - [ ] Static Type checking
 - [ ] Turing Complete
