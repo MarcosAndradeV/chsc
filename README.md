@@ -4,11 +4,30 @@ A programing language inspired by [Porth](https://gitlab.com/tsoding/porth).
 
 ## Goals
 
-- [ ] Stack-oriented (maybe add option to use procedural style)
+- [ ]
 - [ ] Compiled to Fasm Assembly
 - [ ] Static Type checking
 - [ ] Turing Complete
 - [ ] Self Hosting
+
+## Code Examples
+
+```
+import std.io
+
+fn add(a int, b int) int {
+    a + b
+}
+
+fn main() {
+    if add(10, 20) < 10 {
+        writeln("OK")
+    } else {
+        writeln("Err")
+    }
+}
+
+```
 
 ## License
 
