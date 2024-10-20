@@ -4,7 +4,6 @@ A programing language inspired by [Porth](https://gitlab.com/tsoding/porth).
 
 ## Goals
 
-- [ ]
 - [ ] Compiled to Fasm Assembly
 - [ ] Static Type checking
 - [ ] Turing Complete
