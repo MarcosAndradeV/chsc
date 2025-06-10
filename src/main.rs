@@ -1,16 +1,14 @@
 #![allow(dead_code)]
 #![allow(unused)]
 
-use std::{
-    collections::HashMap, env::args, ffi::OsStr, fmt::Display, fs, path::PathBuf, process::Command,
-};
+use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, process::Command};
 
 use crate::chslexer::*;
 
 use crate::fasm_backend::{DataDef, DataDirective, DataExpr, Function, Module, Register};
 
-mod fasm_backend;
 mod chslexer;
+mod fasm_backend;
 
 fn main() {
     let mut args = args();
@@ -27,7 +25,7 @@ fn main() {
     };
 
     let mut l = PeekableLexer::new(&file_path, &source);
-    l.set_is_keyword_fn(|k| matches!(k, "fn" | "var" | "return" | "extern"));
+    l.set_is_keyword_fn(|k| matches!(k, "fn" | "var" | "return" | "extern" | "if" | "while"));
     let mut ctx = CompilerContext::new(&mut l);
     let Some(p) = compile(&mut ctx) else {
         return;
@@ -127,7 +125,6 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             }
         }
     }
-    Some(p)
 }
 
 fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) -> Option<()> {
@@ -136,87 +133,175 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
     expect_token(ctx, TokenKind::OpenParen)?;
     expect_token(ctx, TokenKind::CloseParen)?;
     expect_token(ctx, TokenKind::OpenBrace)?;
-
     loop {
-        let token = ctx.lexer.next_token();
+        let token = ctx.lexer.peek_token();
         if token.is_eof() {
             eprintln!("{}: Unexpected EOF", token.loc);
             return None;
         }
-        match token.kind {
-            TokenKind::CloseBrace => break,
-            TokenKind::Keyword if token.source == "var" => {
-                let name = expect_token(ctx, TokenKind::Identifier)?;
-                let offset = f.vars_table.len();
-                if f.vars_table.insert(name.source, offset).is_some() {
-                    eprintln!("{}: Redefinition of var {}", name.loc, name);
-                    return None;
-                }
-                expect_token(ctx, TokenKind::SemiColon)?;
-            }
-            TokenKind::Keyword if token.source == "return" => {
-                if ctx.lexer.peek_token().kind != TokenKind::SemiColon {
-                    let expr = compile_expr(ctx, &mut f, Precedence::Lowest)?;
-                    f.body.push(Stmt::Return(Some(expr)));
-                } else {
-                    f.body.push(Stmt::Return(None));
-                }
-                expect_token(ctx, TokenKind::SemiColon)?;
-            }
-            TokenKind::Identifier if ctx.lexer.peek_token().kind == TokenKind::Assign => {
-                ctx.lexer.next_token();
-
-                let lhs = compile_expr(ctx, &mut f, Precedence::Lowest)?;
-
-                if let Some(offset) = f.vars_table.get(token.source) {
-                    f.body.push(Stmt::Assign {
-                        rhs: LValue::Var(token, *offset),
-                        lhs,
-                    });
-                } else {
-                    eprintln!("{}: Undefined var {}", token.loc, token);
-                    return None;
-                }
-                expect_token(ctx, TokenKind::SemiColon)?;
-            }
-            TokenKind::Identifier if ctx.lexer.peek_token().kind == TokenKind::OpenParen => {
-                ctx.lexer.next_token();
-                let mut args = vec![];
-                loop {
-                    let val_token = ctx.lexer.peek_token();
-                    match val_token.kind {
-                        TokenKind::CloseParen => break,
-                        TokenKind::Comma => {
-                            ctx.lexer.next_token();
-                        }
-                        _ => args.push(compile_expr(ctx, &mut f, Precedence::Lowest)?),
-                    }
-                }
-                ctx.lexer.next_token();
-                expect_token(ctx, TokenKind::SemiColon)?;
-                f.body.push(Stmt::Funcall(token, args));
-            }
-            _ => {
-                eprintln!("{}: Expected Stmt but got {}", token.loc, token);
-                return None;
-            }
+        if token.kind == TokenKind::CloseBrace {
+            ctx.lexer.next_token();
+            break;
         }
+        compile_stmt(ctx, &mut f)?;
     }
     p.funcs.push(f);
     Some(())
+}
+
+fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Option<()> {
+    let token = ctx.lexer.next_token();
+    match token.kind {
+        TokenKind::Keyword if token.source == "var" => {
+            let name = expect_token(ctx, TokenKind::Identifier)?;
+            let ty = compile_type(ctx)?;
+            let offset = f.temp_count;
+            f.temp_count += 1;
+            if f.vars_table.insert(name.source, (ty, offset)).is_some() {
+                eprintln!("{}: Redefinition of var {}", name.loc, name);
+                return None;
+            }
+            expect_token(ctx, TokenKind::SemiColon)?;
+        }
+        TokenKind::Keyword if token.source == "return" => {
+            if ctx.lexer.peek_token().kind != TokenKind::SemiColon {
+                let expr = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
+                f.body.push(Stmt::Return(Some(expr)));
+            } else {
+                f.body.push(Stmt::Return(None));
+            }
+            expect_token(ctx, TokenKind::SemiColon)?;
+        }
+        TokenKind::Keyword if token.source == "if" => {
+            expect_token(ctx, TokenKind::OpenParen)?;
+            let cond = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
+            expect_token(ctx, TokenKind::CloseParen)?;
+            expect_token(ctx, TokenKind::OpenBrace)?;
+            let if_index = f.body.len();
+            f.body.push(Stmt::Jz { cond, label: 0 });
+            loop {
+                let token = ctx.lexer.peek_token();
+                if token.is_eof() {
+                    eprintln!("{}: Unexpected EOF", token.loc);
+                    return None;
+                }
+                if token.kind == TokenKind::CloseBrace {
+                    ctx.lexer.next_token();
+                    break;
+                }
+                compile_stmt(ctx, f)?;
+            }
+            let false_block_patch = f.body.len();
+            if let Some(Stmt::Jz { cond: _, label }) = f.body.get_mut(if_index) {
+                *label = false_block_patch;
+            }
+            f.body.push(Stmt::Block(false_block_patch));
+        }
+        TokenKind::Keyword if token.source == "while" => {
+            expect_token(ctx, TokenKind::OpenParen)?;
+            let cond_label = f.body.len();
+            f.body.push(Stmt::Block(cond_label));
+            let cond = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
+            expect_token(ctx, TokenKind::CloseParen)?;
+            expect_token(ctx, TokenKind::OpenBrace)?;
+            let patch = f.body.len();
+            f.body.push(Stmt::Jnz {
+                cond,
+                label: 0,
+            });
+            loop {
+                let token = ctx.lexer.peek_token();
+                if token.is_eof() {
+                    eprintln!("{}: Unexpected EOF", token.loc);
+                    return None;
+                }
+                if token.kind == TokenKind::CloseBrace {
+                    ctx.lexer.next_token();
+                    break;
+                }
+                compile_stmt(ctx, f)?;
+            }
+            f.body.push(Stmt::Jmp {
+                label: cond_label,
+            });
+            let len = f.body.len();
+            if let Some(Stmt::Jnz { cond, label }) = f.body.get_mut(patch) {
+                *label = len;
+            }
+            f.body.push(Stmt::Block(len));
+        }
+        TokenKind::Identifier if ctx.lexer.peek_token().kind == TokenKind::Assign => {
+            ctx.lexer.next_token();
+            let lhs = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
+            if let Some((_, offset)) = f.vars_table.get(token.source) {
+                f.body.push(Stmt::Assign {
+                    rhs: LValue::Var(token, *offset),
+                    lhs,
+                });
+            } else {
+                eprintln!("{}: Undefined var {}", token.loc, token);
+                return None;
+            }
+            expect_token(ctx, TokenKind::SemiColon)?;
+        }
+        TokenKind::Identifier if ctx.lexer.peek_token().kind == TokenKind::OpenParen => {
+            ctx.lexer.next_token();
+            let mut args = vec![];
+            loop {
+                let val_token = ctx.lexer.peek_token();
+                match val_token.kind {
+                    TokenKind::CloseParen => break,
+                    TokenKind::Comma => {
+                        ctx.lexer.next_token();
+                    }
+                    _ => args.push(compile_expr(
+                        ctx,
+                        f,
+                        Precedence::Lowest,
+                        &[TokenKind::CloseParen, TokenKind::Comma],
+                    )?),
+                }
+            }
+            ctx.lexer.next_token();
+            expect_token(ctx, TokenKind::SemiColon)?;
+            f.body.push(Stmt::Funcall(token, args));
+        }
+        _ => {
+            eprintln!("{}: Expected Stmt but got {}", token.loc, token);
+            return None;
+        }
+    }
+
+    Some(())
+}
+
+fn compile_type(ctx: &mut CompilerContext<'_>) -> Option<Type> {
+    let token = ctx.lexer.next_token();
+    if token.is_eof() {
+        eprintln!("{}: Unexpected EOF", token.loc);
+        return None;
+    }
+    match token.kind {
+        TokenKind::Identifier if token.source == "word" => Some(Type::Word),
+        _ => {
+            eprintln!("{}: Expected type but got {}", token.loc, token);
+            return None;
+        }
+    }
 }
 
 fn compile_expr<'src>(
     ctx: &mut CompilerContext<'src>,
     f: &mut Func<'src>,
     precedence: Precedence,
+    stop: &[TokenKind],
 ) -> Option<Expr<'src>> {
     let token = ctx.lexer.next_token();
     let mut left = match token.kind {
         TokenKind::IntegerNumber => Expr::IntLit(token),
         TokenKind::StringLiteral => Expr::StrLit(token),
         TokenKind::Identifier => {
-            if let Some(offset) = f.vars_table.get(token.source) {
+            if let Some((_, offset)) = f.vars_table.get(token.source) {
                 Expr::Var(token, *offset)
             } else {
                 eprintln!("{}: Undefined var {}", token.loc, token);
@@ -225,11 +310,11 @@ fn compile_expr<'src>(
         }
         _ => todo!(),
     };
-    while !next_token_is(ctx, &[TokenKind::SemiColon])? && precedence < peek_infix_precedence(ctx) {
+    while !next_token_is(ctx, stop)? && precedence < peek_infix_precedence(ctx) {
         let token = ctx.lexer.next_token();
         let infix = {
             let precedence = Precedence::from_token_kind(&token.kind);
-            let right = compile_expr(ctx, f, precedence)?;
+            let right = compile_expr(ctx, f, precedence, stop)?;
             let id = f.temp_count;
             f.temp_count += 1;
             f.body.push(Stmt::Binop {
@@ -263,8 +348,7 @@ fn generate(p: Program) -> Option<Module> {
 fn generate_func(func: Func, m: &mut Module) -> Option<()> {
     let mut f = Function::new(true, func.name.source);
     f.allocate_stack((func.vars_table.len() + func.temp_count) * 8);
-    let id = f.blocks.len();
-    f.push_block(format!("b{id}"));
+    f.push_block("start");
     for stmt in func.body {
         match stmt {
             Stmt::Assign {
@@ -275,7 +359,6 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 let offset = id * 8;
                 f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
             }
-
             Stmt::Return(expr) => {
                 if let Some(expr) = expr {
                     generate_expr(m, &mut f, expr, Register::Rax)?;
@@ -287,7 +370,6 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
             Stmt::Funcall(token, exprs) => {
                 let call_conv_len = Register::get_syscall_call_convention().len();
                 let mut regs = Register::get_syscall_call_convention().into_iter();
-                let mut i = 0;
                 assert!(exprs.len() < call_conv_len, "Implement args via stack");
                 for expr in exprs {
                     let reg = regs.next().unwrap();
@@ -296,7 +378,7 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 f.push_raw_instr(format!("call _{token}"));
             }
             Stmt::Binop {
-                loc,
+                loc: _,
                 result,
                 operator,
                 rhs,
@@ -304,12 +386,47 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
             } => {
                 generate_expr(m, &mut f, lhs, Register::Rbx)?;
                 generate_expr(m, &mut f, rhs, Register::Rax)?;
-                match operator {
-                    BinaryOperator::Add => f.push_raw_instr(format!("add rax, rbx")),
-                    BinaryOperator::Mul => f.push_raw_instr(format!("imul rax, rbx")),
-                }
                 let offset = result * 8;
-                f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
+                let mut out_reg = Register::Rax;
+                match operator {
+                    BinaryOperator::Add => f.push_raw_instr("add rax, rbx"),
+                    BinaryOperator::Mul => f.push_raw_instr("imul rax, rbx"),
+                    BinaryOperator::Sub => f.push_raw_instr("sub rax, rbx"),
+                    BinaryOperator::Mod => {
+                        f.push_raw_instr("cqo");
+                        f.push_raw_instr("idiv rbx");
+                        out_reg = Register::Rdx;
+                    }
+                    BinaryOperator::Div => {
+                        f.push_raw_instr("cqo");
+                        f.push_raw_instr("idiv rbx");
+                    }
+                    BinaryOperator::Less => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr("cmp rax, rbx");
+                        f.push_raw_instr("setl dl");
+                        out_reg = Register::Rdx;
+                    }
+                }
+                f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {out_reg}"));
+            }
+            Stmt::Jnz { cond, label } => {
+                let reg = Register::Rax;
+                generate_expr(m, &mut f, cond, reg)?;
+                f.push_raw_instr(format!("test {reg}, {reg}"));
+                f.push_raw_instr(format!("jnz .b{label}"));
+            }
+            Stmt::Jz { cond, label } => {
+                let reg = Register::Rax;
+                generate_expr(m, &mut f, cond, reg)?;
+                f.push_raw_instr(format!("test {reg}, {reg}"));
+                f.push_raw_instr(format!("jz .b{label}"));
+            }
+            Stmt::Jmp { label } => {
+                f.push_raw_instr(format!("jmp .b{label}"));
+            }
+            Stmt::Block(id) => {
+                f.push_block(format!("b{id}"));
             }
         }
     }
@@ -378,7 +495,7 @@ struct Program<'src> {
 #[derive(Debug, Default)]
 struct Func<'src> {
     name: Token<'src>,
-    vars_table: HashMap<&'src str, VarId>,
+    vars_table: HashMap<&'src str, (Type, VarId)>,
     temp_count: usize,
     body: Vec<Stmt<'src>>,
 }
@@ -407,19 +524,39 @@ enum Stmt<'src> {
         rhs: Expr<'src>,
         lhs: Expr<'src>,
     },
+    Jnz {
+        cond: Expr<'src>,
+        label: usize,
+    },
+    Jz {
+        cond: Expr<'src>,
+        label: usize,
+    },
+    Block(usize),
+    Jmp {
+        label: usize,
+    },
 }
 
 #[derive(Debug)]
 enum BinaryOperator {
     Add,
+    Sub,
     Mul,
+    Div,
+    Mod,
+    Less,
 }
 
 impl BinaryOperator {
     pub fn from_token(token: &Token) -> Option<Self> {
         match token.kind {
             TokenKind::Plus => Some(Self::Add),
+            TokenKind::Minus => Some(Self::Sub),
             TokenKind::Asterisk => Some(Self::Mul),
+            TokenKind::Mod => Some(Self::Mod),
+            TokenKind::Slash => Some(Self::Div),
+            TokenKind::Lt => Some(Self::Less),
             _ => {
                 eprintln!("{}: {} is not a binary operator", token.loc, token);
                 None
@@ -431,6 +568,11 @@ impl BinaryOperator {
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Precedence {
     Lowest = 1,
+    Assignment,
+    LogicalOr,
+    LogicalAnd,
+    Equality,
+    Comparison,
     Sum,
     Factor,
 }
@@ -438,8 +580,9 @@ enum Precedence {
 impl Precedence {
     pub fn from_token_kind(kind: &TokenKind) -> Precedence {
         match kind {
-            TokenKind::Plus => Self::Sum,
-            TokenKind::Asterisk => Self::Factor,
+            TokenKind::Plus | TokenKind::Minus => Self::Sum,
+            TokenKind::Asterisk | TokenKind::Slash | TokenKind::Mod => Self::Factor,
+            TokenKind::Lt => Self::Comparison,
             _ => Self::Lowest,
         }
     }
@@ -453,12 +596,6 @@ enum Expr<'src> {
     Var(Token<'src>, VarId),
     IntLit(Token<'src>),
     StrLit(Token<'src>),
-}
-
-impl<'src> Expr<'src> {
-    pub fn is_rvalue(&self) -> bool {
-        matches!(self, Self::Var(..))
-    }
 }
 
 #[derive(Debug)]
