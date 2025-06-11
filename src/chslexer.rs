@@ -417,7 +417,6 @@ impl<'src> Lexer<'src> {
             let ch = self.read_char();
             match ch {
                 _ if ch.is_ascii_whitespace() => {
-                    self.advance();
                     break;
                 }
                 b'(' => {

@@ -106,6 +106,8 @@ impl<'src> CompilerContext<'src> {
 
 fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
     let mut p = Program::default();
+    p.push_scope();
+    let mut attr_stack: HashMap<&'src str, Option<&'src str>> = HashMap::new();
 
     loop {
         let token = ctx.lexer.next_token();
@@ -115,22 +117,62 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
         }
 
         match token.kind {
-            TokenKind::Keyword if token.source == "fn" => compile_func(ctx, &mut p)?,
+            TokenKind::MacroCall => {
+                let name = &token.source[1..token.source.len()];
+                attr_stack.insert(name, None);
+            }
+            TokenKind::MacroCallWithArgs => {
+                let idx = token.source.find("(").unwrap();
+                let name = &token.source[1..idx];
+                let val = &token.source[idx + 1..token.source.len() - 1];
+                attr_stack.insert(name, Some(val));
+            }
+            TokenKind::Keyword if token.source == "fn" => {
+                compile_func(ctx, &mut p)?;
+            }
             TokenKind::Keyword if token.source == "extern" => {
+                expect_token_source(ctx, TokenKind::Keyword, "fn")?;
                 let fname = expect_token(ctx, TokenKind::Identifier)?;
-                let ty = compile_type(ctx)?;
-                if p.externs.insert(fname.source) {
-                    eprintln!("{}: Redefinition of extern {}", fname.loc, fname);
-                    return None;
+                expect_token(ctx, TokenKind::OpenParen)?;
+                loop {
+                    let token = ctx.lexer.peek_token();
+                    match token.kind {
+                        TokenKind::CloseParen => {
+                            ctx.lexer.next_token();
+                            break;
+                        }
+                        TokenKind::Comma => {
+                            ctx.lexer.next_token();
+                        }
+                        TokenKind::Splat => {
+                            ctx.lexer.next_token();
+                            expect_token(ctx, TokenKind::CloseParen)?;
+                            break;
+                        }
+                        _ => {
+                            compile_type(ctx)?;
+                        }
+                    }
+                }
+                if ctx.lexer.peek_token().kind == TokenKind::Arrow {
+                    ctx.lexer.next_token();
+                    compile_type(ctx)?;
                 }
                 expect_token(ctx, TokenKind::SemiColon)?;
+                p.externs.insert(fname.source);
             }
             TokenKind::Keyword if token.source == "var" => {
-                let name = expect_token(ctx, TokenKind::Identifier)?;
+                let token = expect_token(ctx, TokenKind::Identifier)?;
                 let ty = compile_type(ctx)?;
-                let v = Global { token: name, ty };
-                if p.globals.insert(name.source, v).is_some() {
-                    eprintln!("{}: Redefinition of global var {}", name.loc, name);
+                let v = Var {
+                    storage: Storage::Global,
+                    token,
+                    ty,
+                    id: 0,
+                };
+                let id = p.push_var(v);
+                if p.insert_var_index(token.source, id).is_some() {
+                    eprintln!("{}: Redefinition of global var {}", token.loc, token);
                     return None;
                 }
                 expect_token(ctx, TokenKind::SemiColon)?;
@@ -153,6 +195,11 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
         match token.kind {
             TokenKind::CloseParen => break,
             TokenKind::Comma => {}
+            TokenKind::Splat => {
+                expect_token(ctx, TokenKind::CloseParen)?;
+                f.is_variadic = true;
+                break;
+            }
             TokenKind::Identifier => {
                 let ty = compile_type(ctx)?;
                 let id = f.temp_count;
@@ -163,7 +210,8 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
                     ty,
                     id,
                 };
-                if f.vars_table.insert(token.source, v).is_some() {
+                let id = p.push_var(v);
+                if p.insert_var_index(token.source, id).is_some() {
                     eprintln!("{}: Redefinition of arg {}", token.loc, token);
                     return None;
                 }
@@ -175,11 +223,14 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
             }
         }
     }
+
     if ctx.lexer.peek_token().kind == TokenKind::Arrow {
         ctx.lexer.next_token();
         f.ret_ty = Some(compile_type(ctx)?);
     }
+
     expect_token(ctx, TokenKind::OpenBrace)?;
+    p.push_scope();
     loop {
         let token = ctx.lexer.peek_token();
         if token.is_eof() {
@@ -192,13 +243,14 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
         }
         compile_stmt(ctx, p, &mut f)?;
     }
+    p.pop_scope();
     p.funcs.push(f);
     Some(())
 }
 
 fn compile_stmt<'src>(
     ctx: &mut CompilerContext<'src>,
-    p: &Program<'src>,
+    p: &mut Program<'src>,
     f: &mut Func<'src>,
 ) -> Option<()> {
     let token = ctx.lexer.next_token();
@@ -214,7 +266,8 @@ fn compile_stmt<'src>(
                 ty,
                 id,
             };
-            if f.vars_table.insert(name.source, v).is_some() {
+            let index = p.push_var(v);
+            if p.insert_var_index(name.source, index).is_some() {
                 eprintln!("{}: Redefinition of var {}", name.loc, name);
                 return None;
             }
@@ -308,10 +361,12 @@ fn compile_stmt<'src>(
         _ => {
             let lhs = match token.kind {
                 TokenKind::Identifier => {
-                    if let Some(v) = f.vars_table.get(token.source) {
-                        Expr::Var(token, v.id)
-                    } else if let Some(_) = p.globals.get(token.source) {
-                        Expr::GlobalVar(token)
+                    if let Some(&index) = p.get_var_index(token.source) {
+                        let var = p.get_var(index)?;
+                        match var.storage {
+                            Storage::Global => Expr::GlobalVar(token),
+                            Storage::Local => Expr::Var(token, var.id),
+                        }
                     } else {
                         eprintln!("{}: Undefined var {}", token.loc, token);
                         return None;
@@ -367,10 +422,12 @@ fn compile_expr<'src>(
         TokenKind::IntegerNumber => Expr::IntLit(token),
         TokenKind::StringLiteral => Expr::StrLit(token),
         TokenKind::Identifier => {
-            if let Some(v) = f.vars_table.get(token.source) {
-                Expr::Var(token, v.id)
-            } else if let Some(_) = p.globals.get(token.source) {
-                Expr::GlobalVar(token)
+            if let Some(&index) = p.get_var_index(token.source) {
+                let var = p.get_var(index)?;
+                match var.storage {
+                    Storage::Global => Expr::GlobalVar(token),
+                    Storage::Local => Expr::Var(token, var.id),
+                }
             } else {
                 eprintln!("{}: Undefined var {}", token.loc, token);
                 return None;
@@ -413,9 +470,9 @@ fn generate(p: Program) -> Option<Module> {
         generate_func(func, &mut m)?
     }
 
-    for (name, v) in p.globals {
+    for v in p.vars.iter().filter(|v| v.storage.is_global()) {
         m.push_data(DataDef::new(
-            format!("_{name}"),
+            format!("_{}", v.token),
             DataDirective::Rq,
             vec![DataExpr::Const(v.ty.size() as u64)],
         ));
@@ -588,6 +645,20 @@ fn next_token_is<'src>(ctx: &mut CompilerContext<'src>, kind: &[TokenKind]) -> O
     Some(kind.contains(&token.kind))
 }
 
+fn expect_token_source<'src>(
+    ctx: &mut CompilerContext<'src>,
+    kind: TokenKind,
+    source: &str,
+) -> Option<Token<'src>> {
+    let token = expect_token(ctx, kind)?;
+    if token.source == source {
+        return Some(token);
+    } else {
+        eprintln!("{}: Expected {:?}({}) got token {}", token.loc, kind,source, token);
+        return None;
+    }
+}
+
 fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Option<Token<'src>> {
     let token = ctx.lexer.next_token();
     if token.kind == kind {
@@ -601,19 +672,57 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 #[derive(Debug, Default)]
 struct Program<'src> {
     externs: HashSet<&'src str>,
-    globals: HashMap<&'src str, Global<'src>>,
-
+    vars: Vec<Var<'src>>,
+    vars_index: Vec<HashMap<&'src str, VarId>>,
     funcs: Vec<Func<'src>>,
-    types: HashMap<&'src str, Type>,
+}
+
+impl<'src> Program<'src> {
+    pub fn push_scope(&mut self) {
+        self.vars_index.push(HashMap::new());
+    }
+
+    pub fn pop_scope(&mut self) {
+        assert!(self.vars_index.len() != 1);
+        self.vars_index.pop();
+    }
+
+    pub fn push_var(&mut self, v: Var<'src>) -> VarId {
+        let id = self.vars.len();
+        self.vars.push(v);
+        id
+    }
+
+    pub fn insert_var_index(&mut self, k: &'src str, v: VarId) -> Option<VarId> {
+        self.vars_index
+            .last_mut()
+            .and_then(|scope| scope.insert(k, v))
+    }
+
+    pub fn get_var_index(&self, k: &'src str) -> Option<&VarId> {
+        for scope in self.vars_index.iter().rev() {
+            let v = scope.get(k);
+            if v.is_some() {
+                return v;
+            }
+        }
+        None
+    }
+
+    pub fn get_var(&self, index: VarId) -> Option<&Var> {
+        self.vars.get(index)
+    }
 }
 
 #[derive(Debug, Default)]
 struct Func<'src> {
     name: Token<'src>,
+
     arg_count: usize,
-    vars_table: HashMap<&'src str, Var<'src>>,
-    temp_count: usize,
     ret_ty: Option<Type>,
+    is_variadic: bool,
+
+    temp_count: usize,
     body: Vec<Stmt<'src>>,
 }
 
@@ -729,6 +838,11 @@ struct Var<'src> {
 enum Storage {
     Global,
     Local,
+}
+impl Storage {
+    fn is_global(&self) -> bool {
+        matches!(self, Self::Global)
+    }
 }
 
 #[derive(Debug)]
