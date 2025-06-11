@@ -118,7 +118,11 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             TokenKind::Keyword if token.source == "extern" => {
                 let fname = expect_token(ctx, TokenKind::Identifier)?;
                 let ty = compile_type(ctx)?;
-                p.extern_funcs.push((fname, ty));
+                if p.func_types.insert(fname.source, ty).is_some() {
+                    eprintln!("{}: Redefinition of extern {}", fname.loc, fname);
+                    return None;
+                }
+                p.extern_funcs.push(fname);
                 expect_token(ctx, TokenKind::SemiColon)?;
             }
             TokenKind::Keyword if token.source == "var" => {
@@ -148,7 +152,34 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
     let fname = expect_token(ctx, TokenKind::Identifier)?;
     let mut f = Func::new(fname);
     expect_token(ctx, TokenKind::OpenParen)?;
-    expect_token(ctx, TokenKind::CloseParen)?;
+
+    loop {
+        let token = ctx.lexer.next_token();
+        match token.kind {
+            TokenKind::CloseParen => break,
+            TokenKind::Comma => {}
+            TokenKind::Identifier => {
+                let ty = compile_type(ctx)?;
+                let id = f.temp_count;
+                f.temp_count += 1;
+                let v = Var {
+                    storage: Storage::Local,
+                    token,
+                    ty,
+                    id,
+                };
+                if f.vars_table.insert(token.source, v).is_some() {
+                    eprintln!("{}: Redefinition of arg {}", token.loc, token);
+                    return None;
+                }
+                f.arg_count += 1;
+            }
+            _ => {
+                eprintln!("{}: Expected arg but got {}", token.loc, token);
+                return None;
+            }
+        }
+    }
     if ctx.lexer.peek_token().kind == TokenKind::Arrow {
         ctx.lexer.next_token();
         f.ret_ty = Some(compile_type(ctx)?);
@@ -404,7 +435,7 @@ fn compile_expr<'src>(
 fn generate(p: Program) -> Option<Module> {
     let mut m = Module::new(true);
 
-    for (name, _) in p.extern_funcs {
+    for name in p.extern_funcs {
         m.push_extrn(name.source);
     }
 
@@ -427,6 +458,15 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
     let mut f = Function::new(true, func.name.source);
     f.allocate_stack(func.temp_count * 8);
     f.push_block("start");
+    assert!(
+        func.arg_count < Register::get_syscall_call_convention().len(),
+        "Implement args via stack"
+    );
+    let regs = Register::get_syscall_call_convention().into_iter();
+    for (id, reg) in (0..func.arg_count).into_iter().zip(regs) {
+        let offset = id * 8;
+        f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {reg}"));
+    }
     for stmt in func.body {
         match stmt {
             Stmt::Assign {
@@ -591,16 +631,18 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 #[derive(Debug, Default)]
 struct Program<'src> {
     funcs: Vec<Func<'src>>,
-    extern_funcs: Vec<(Token<'src>, Type)>,
+    extern_funcs: Vec<Token<'src>>,
     global_vars_table: HashMap<&'src str, Var<'src>>,
+    func_types: HashMap<&'src str, Type>,
 }
 
 #[derive(Debug, Default)]
 struct Func<'src> {
     name: Token<'src>,
+    arg_count: usize,
     vars_table: HashMap<&'src str, Var<'src>>,
     temp_count: usize,
-    ret_ty : Option<Type>,
+    ret_ty: Option<Type>,
     body: Vec<Stmt<'src>>,
 }
 
