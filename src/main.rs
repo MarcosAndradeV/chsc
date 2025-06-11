@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused)]
 
+use std::collections::HashSet;
 use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, process::Command};
 
 use crate::chslexer::*;
@@ -118,23 +119,17 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             TokenKind::Keyword if token.source == "extern" => {
                 let fname = expect_token(ctx, TokenKind::Identifier)?;
                 let ty = compile_type(ctx)?;
-                if p.func_types.insert(fname.source, ty).is_some() {
+                if p.externs.insert(fname.source) {
                     eprintln!("{}: Redefinition of extern {}", fname.loc, fname);
                     return None;
                 }
-                p.extern_funcs.push(fname);
                 expect_token(ctx, TokenKind::SemiColon)?;
             }
             TokenKind::Keyword if token.source == "var" => {
                 let name = expect_token(ctx, TokenKind::Identifier)?;
                 let ty = compile_type(ctx)?;
-                let v = Var {
-                    storage: Storage::Global,
-                    token: name,
-                    ty,
-                    id: 0,
-                };
-                if p.global_vars_table.insert(name.source, v).is_some() {
+                let v = Global { token: name, ty };
+                if p.globals.insert(name.source, v).is_some() {
                     eprintln!("{}: Redefinition of global var {}", name.loc, name);
                     return None;
                 }
@@ -315,7 +310,7 @@ fn compile_stmt<'src>(
                 TokenKind::Identifier => {
                     if let Some(v) = f.vars_table.get(token.source) {
                         Expr::Var(token, v.id)
-                    } else if let Some(_) = p.global_vars_table.get(token.source) {
+                    } else if let Some(_) = p.globals.get(token.source) {
                         Expr::GlobalVar(token)
                     } else {
                         eprintln!("{}: Undefined var {}", token.loc, token);
@@ -353,31 +348,6 @@ fn compile_type(ctx: &mut CompilerContext<'_>) -> Option<Type> {
         TokenKind::Identifier if token.source == "word" => Some(Type::Word),
         TokenKind::Identifier if token.source == "i32" => Some(Type::I32),
         TokenKind::Identifier if token.source == "ptr" => Some(Type::Ptr),
-        TokenKind::Keyword if token.source == "fn" => {
-            expect_token(ctx, TokenKind::OpenParen)?;
-            let mut variadic = false;
-            let mut func = vec![];
-            loop {
-                let token = ctx.lexer.peek_token();
-                match token.kind {
-                    TokenKind::CloseParen => break,
-                    TokenKind::Comma => {
-                        ctx.lexer.next_token();
-                    }
-                    TokenKind::Splat => {
-                        ctx.lexer.next_token();
-                        expect_token(ctx, TokenKind::CloseParen)?;
-                        break;
-                    }
-                    _ => func.push(compile_type(ctx)?),
-                }
-            }
-            if next_token_is(ctx, &[TokenKind::Arrow])? {
-                ctx.lexer.next_token();
-                func.push(compile_type(ctx)?);
-            }
-            Some(Type::Fn(func, variadic))
-        }
         _ => {
             eprintln!("{}: Expected type but got {}", token.loc, token);
             return None;
@@ -399,7 +369,7 @@ fn compile_expr<'src>(
         TokenKind::Identifier => {
             if let Some(v) = f.vars_table.get(token.source) {
                 Expr::Var(token, v.id)
-            } else if let Some(_) = p.global_vars_table.get(token.source) {
+            } else if let Some(_) = p.globals.get(token.source) {
                 Expr::GlobalVar(token)
             } else {
                 eprintln!("{}: Undefined var {}", token.loc, token);
@@ -435,15 +405,15 @@ fn compile_expr<'src>(
 fn generate(p: Program) -> Option<Module> {
     let mut m = Module::new(true);
 
-    for name in p.extern_funcs {
-        m.push_extrn(name.source);
+    for name in p.externs {
+        m.push_extrn(name);
     }
 
     for func in p.funcs {
         generate_func(func, &mut m)?
     }
 
-    for (name, v) in p.global_vars_table {
+    for (name, v) in p.globals {
         m.push_data(DataDef::new(
             format!("_{name}"),
             DataDirective::Rq,
@@ -630,10 +600,11 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 
 #[derive(Debug, Default)]
 struct Program<'src> {
+    externs: HashSet<&'src str>,
+    globals: HashMap<&'src str, Global<'src>>,
+
     funcs: Vec<Func<'src>>,
-    extern_funcs: Vec<Token<'src>>,
-    global_vars_table: HashMap<&'src str, Var<'src>>,
-    func_types: HashMap<&'src str, Type>,
+    types: HashMap<&'src str, Type>,
 }
 
 #[derive(Debug, Default)]
@@ -741,6 +712,12 @@ impl Precedence {
 type VarId = usize;
 
 #[derive(Debug)]
+struct Global<'src> {
+    token: Token<'src>,
+    ty: Type,
+}
+
+#[derive(Debug)]
 struct Var<'src> {
     storage: Storage,
     token: Token<'src>,
@@ -767,7 +744,6 @@ enum Expr<'src> {
 enum Type {
     Word,
     Ptr,
-    Fn(Vec<Self>, bool),
     I32,
 }
 
@@ -777,7 +753,6 @@ impl Type {
             Type::Word => 8,
             Type::Ptr => 8,
             Type::I32 => 4,
-            Type::Fn(..) => 8, // Function Pointer
         }
     }
 }
