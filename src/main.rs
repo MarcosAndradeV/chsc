@@ -5,7 +5,9 @@ use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, proces
 
 use crate::chslexer::*;
 
-use crate::fasm_backend::{DataDef, DataDirective, DataExpr, Function, Module, Register};
+use crate::fasm_backend::{
+    Addr, DataDef, DataDirective, DataExpr, Function, Module, Register, SizeOperator, Value,
+};
 
 mod chslexer;
 mod fasm_backend;
@@ -123,7 +125,13 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             TokenKind::Keyword if token.source == "var" => {
                 let name = expect_token(ctx, TokenKind::Identifier)?;
                 let ty = compile_type(ctx)?;
-                if p.global_vars_table.insert(name.source, ty).is_some() {
+                let v = Var {
+                    storage: Storage::Global,
+                    token: name,
+                    ty,
+                    id: 0,
+                };
+                if p.global_vars_table.insert(name.source, v).is_some() {
                     eprintln!("{}: Redefinition of global var {}", name.loc, name);
                     return None;
                 }
@@ -169,9 +177,15 @@ fn compile_stmt<'src>(
         TokenKind::Keyword if token.source == "var" => {
             let name = expect_token(ctx, TokenKind::Identifier)?;
             let ty = compile_type(ctx)?;
-            let offset = f.temp_count;
+            let id = f.temp_count;
             f.temp_count += 1;
-            if f.vars_table.insert(name.source, (ty, offset)).is_some() {
+            let v = Var {
+                storage: Storage::Local,
+                token: name,
+                ty,
+                id,
+            };
+            if f.vars_table.insert(name.source, v).is_some() {
                 eprintln!("{}: Redefinition of var {}", name.loc, name);
                 return None;
             }
@@ -265,10 +279,10 @@ fn compile_stmt<'src>(
         _ => {
             let lhs = match token.kind {
                 TokenKind::Identifier => {
-                    if let Some((_, offset)) = f.vars_table.get(token.source) {
-                        Expr::Var(token, *offset)
-                    } else if let Some(t) = p.global_vars_table.get(token.source) {
-                        Expr::GlobalVar(token, t.clone())
+                    if let Some(v) = f.vars_table.get(token.source) {
+                        Expr::Var(token, v.id)
+                    } else if let Some(_) = p.global_vars_table.get(token.source) {
+                        Expr::GlobalVar(token)
                     } else {
                         eprintln!("{}: Undefined var {}", token.loc, token);
                         return None;
@@ -324,10 +338,10 @@ fn compile_expr<'src>(
         TokenKind::IntegerNumber => Expr::IntLit(token),
         TokenKind::StringLiteral => Expr::StrLit(token),
         TokenKind::Identifier => {
-            if let Some((_, offset)) = f.vars_table.get(token.source) {
-                Expr::Var(token, *offset)
-            } else if let Some(t) = p.global_vars_table.get(token.source) {
-                Expr::GlobalVar(token, t.clone())
+            if let Some(v) = f.vars_table.get(token.source) {
+                Expr::Var(token, v.id)
+            } else if let Some(_) = p.global_vars_table.get(token.source) {
+                Expr::GlobalVar(token)
             } else {
                 eprintln!("{}: Undefined var {}", token.loc, token);
                 return None;
@@ -370,11 +384,11 @@ fn generate(p: Program) -> Option<Module> {
         generate_func(func, &mut m)?
     }
 
-    for (name, t) in p.global_vars_table {
+    for (name, v) in p.global_vars_table {
         m.push_data(DataDef::new(
             format!("_{name}"),
             DataDirective::Rq,
-            vec![DataExpr::Const(t.size() as u64)],
+            vec![DataExpr::Const(v.ty.size() as u64)],
         ));
     }
 
@@ -391,21 +405,26 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 lhs: Expr::Var(_, id),
                 rhs,
             } => {
-                generate_expr(m, &mut f, rhs, Register::Rax)?;
                 let offset = id * 8;
+                generate_expr(
+                    m,
+                    &mut f,
+                    rhs,
+                    Value::Register(Register::Rax),
+                )?;
                 f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
             }
             Stmt::Assign {
-                lhs: Expr::GlobalVar(token, s),
+                lhs: Expr::GlobalVar(token),
                 rhs,
             } => {
-                generate_expr(m, &mut f, rhs, Register::Rax)?;
+                generate_expr(m, &mut f, rhs, Value::Register(Register::Rax))?;
                 f.push_raw_instr(format!("mov QWORD [_{token}], rax"));
             }
             Stmt::Assign { .. } => unreachable!(),
             Stmt::Return(expr) => {
                 if let Some(expr) = expr {
-                    generate_expr(m, &mut f, expr, Register::Rax)?;
+                    generate_expr(m, &mut f, expr, Value::Register(Register::Rax))?;
                 }
                 f.push_raw_instr("mov rsp, rbp");
                 f.push_raw_instr("pop rbp");
@@ -418,7 +437,7 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 );
                 let mut regs = Register::get_syscall_call_convention().into_iter();
                 for (expr, reg) in exprs.into_iter().zip(regs).rev() {
-                    generate_expr(m, &mut f, expr, reg)?;
+                    generate_expr(m, &mut f, expr, Value::Register(reg))?;
                 }
 
                 // x86_64 Linux ABI passes the amount of floating point args via al.
@@ -432,8 +451,8 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 lhs,
                 rhs,
             } => {
-                generate_expr(m, &mut f, lhs, Register::Rax)?;
-                generate_expr(m, &mut f, rhs, Register::Rbx)?;
+                generate_expr(m, &mut f, lhs, Value::Register(Register::Rax))?;
+                generate_expr(m, &mut f, rhs, Value::Register(Register::Rbx))?;
                 let offset = result * 8;
                 let mut out_reg = Register::Rax;
                 match operator {
@@ -469,13 +488,13 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
             }
             Stmt::Jnz { cond, label } => {
                 let reg = Register::Rax;
-                generate_expr(m, &mut f, cond, reg)?;
+                generate_expr(m, &mut f, cond, Value::Register(reg))?;
                 f.push_raw_instr(format!("test {reg}, {reg}"));
                 f.push_raw_instr(format!("jnz .b{label}"));
             }
             Stmt::Jz { cond, label } => {
                 let reg = Register::Rax;
-                generate_expr(m, &mut f, cond, reg)?;
+                generate_expr(m, &mut f, cond, Value::Register(reg))?;
                 f.push_raw_instr(format!("test {reg}, {reg}"));
                 f.push_raw_instr(format!("jz .b{label}"));
             }
@@ -492,21 +511,21 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
     Some(())
 }
 
-fn generate_expr<'src>(m: &mut Module, f: &mut Function, expr: Expr, reg: Register) -> Option<()> {
+fn generate_expr<'src>(m: &mut Module, f: &mut Function, expr: Expr, val: Value) -> Option<()> {
     match expr {
         Expr::Temp(id) => {
             let offset = id * 8;
-            f.push_raw_instr(format!("mov {reg}, [rbp-{offset}]"));
+            f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
         }
         Expr::Var(_, id) => {
             let offset = id * 8;
-            f.push_raw_instr(format!("mov {reg}, [rbp-{offset}]"));
+            f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
         }
-        Expr::GlobalVar(token, _) => {
-            f.push_raw_instr(format!("mov {reg}, [_{token}]"));
+        Expr::GlobalVar(token) => {
+            f.push_raw_instr(format!("mov {val}, [_{token}]"));
         }
         Expr::IntLit(token) => {
-            f.push_raw_instr(format!("mov {reg}, {token}"));
+            f.push_raw_instr(format!("mov {val}, {token}"));
         }
         Expr::StrLit(token) => {
             let id = m.data.len();
@@ -516,7 +535,7 @@ fn generate_expr<'src>(m: &mut Module, f: &mut Function, expr: Expr, reg: Regist
                 DataDirective::Db,
                 vec![DataExpr::Str(token.unescape()), DataExpr::Const(0)],
             ));
-            f.push_raw_instr(format!("mov {reg}, {name}"));
+            f.push_raw_instr(format!("mov {val}, {name}"));
         }
     }
 
@@ -550,13 +569,13 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 struct Program<'src> {
     funcs: Vec<Func<'src>>,
     extern_funcs: Vec<Token<'src>>,
-    global_vars_table: HashMap<&'src str, Type>,
+    global_vars_table: HashMap<&'src str, Var<'src>>,
 }
 
 #[derive(Debug, Default)]
 struct Func<'src> {
     name: Token<'src>,
-    vars_table: HashMap<&'src str, (Type, VarId)>,
+    vars_table: HashMap<&'src str, Var<'src>>,
     temp_count: usize,
     body: Vec<Stmt<'src>>,
 }
@@ -656,10 +675,24 @@ impl Precedence {
 type VarId = usize;
 
 #[derive(Debug)]
+struct Var<'src> {
+    storage: Storage,
+    token: Token<'src>,
+    ty: Type,
+    id: VarId,
+}
+
+#[derive(Debug, Clone)]
+enum Storage {
+    Global,
+    Local,
+}
+
+#[derive(Debug)]
 enum Expr<'src> {
-    Temp(usize),
+    Temp(VarId),
     Var(Token<'src>, VarId),
-    GlobalVar(Token<'src>, Type),
+    GlobalVar(Token<'src>),
     IntLit(Token<'src>),
     StrLit(Token<'src>),
 }
