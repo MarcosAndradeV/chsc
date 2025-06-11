@@ -5,9 +5,7 @@ use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, proces
 
 use crate::chslexer::*;
 
-use crate::fasm_backend::{
-    Addr, DataDef, DataDirective, DataExpr, Function, Module, Register, SizeOperator, Value,
-};
+use crate::fasm_backend::{DataDef, DataDirective, DataExpr, Function, Module, Register, Value};
 
 mod chslexer;
 mod fasm_backend;
@@ -119,7 +117,8 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             TokenKind::Keyword if token.source == "fn" => compile_func(ctx, &mut p)?,
             TokenKind::Keyword if token.source == "extern" => {
                 let fname = expect_token(ctx, TokenKind::Identifier)?;
-                p.extern_funcs.push(fname);
+                let ty = compile_type(ctx)?;
+                p.extern_funcs.push((fname, ty));
                 expect_token(ctx, TokenKind::SemiColon)?;
             }
             TokenKind::Keyword if token.source == "var" => {
@@ -150,6 +149,10 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
     let mut f = Func::new(fname);
     expect_token(ctx, TokenKind::OpenParen)?;
     expect_token(ctx, TokenKind::CloseParen)?;
+    if ctx.lexer.peek_token().kind == TokenKind::Arrow {
+        ctx.lexer.next_token();
+        f.ret_ty = Some(compile_type(ctx)?);
+    }
     expect_token(ctx, TokenKind::OpenBrace)?;
     loop {
         let token = ctx.lexer.peek_token();
@@ -248,7 +251,7 @@ fn compile_stmt<'src>(
             }
             f.body.push(Stmt::Jmp { label: cond_label });
             let len = f.body.len();
-            if let Some(Stmt::Jz { cond, label }) = f.body.get_mut(patch) {
+            if let Some(Stmt::Jz { cond: _, label }) = f.body.get_mut(patch) {
                 *label = len;
             }
             f.body.push(Stmt::Block(len));
@@ -319,6 +322,31 @@ fn compile_type(ctx: &mut CompilerContext<'_>) -> Option<Type> {
         TokenKind::Identifier if token.source == "word" => Some(Type::Word),
         TokenKind::Identifier if token.source == "i32" => Some(Type::I32),
         TokenKind::Identifier if token.source == "ptr" => Some(Type::Ptr),
+        TokenKind::Keyword if token.source == "fn" => {
+            expect_token(ctx, TokenKind::OpenParen)?;
+            let mut variadic = false;
+            let mut func = vec![];
+            loop {
+                let token = ctx.lexer.peek_token();
+                match token.kind {
+                    TokenKind::CloseParen => break,
+                    TokenKind::Comma => {
+                        ctx.lexer.next_token();
+                    }
+                    TokenKind::Splat => {
+                        ctx.lexer.next_token();
+                        expect_token(ctx, TokenKind::CloseParen)?;
+                        break;
+                    }
+                    _ => func.push(compile_type(ctx)?),
+                }
+            }
+            if next_token_is(ctx, &[TokenKind::Arrow])? {
+                ctx.lexer.next_token();
+                func.push(compile_type(ctx)?);
+            }
+            Some(Type::Fn(func, variadic))
+        }
         _ => {
             eprintln!("{}: Expected type but got {}", token.loc, token);
             return None;
@@ -376,7 +404,7 @@ fn compile_expr<'src>(
 fn generate(p: Program) -> Option<Module> {
     let mut m = Module::new(true);
 
-    for name in p.extern_funcs {
+    for (name, _) in p.extern_funcs {
         m.push_extrn(name.source);
     }
 
@@ -397,7 +425,7 @@ fn generate(p: Program) -> Option<Module> {
 
 fn generate_func(func: Func, m: &mut Module) -> Option<()> {
     let mut f = Function::new(true, func.name.source);
-    f.allocate_stack((func.temp_count) * 8);
+    f.allocate_stack(func.temp_count * 8);
     f.push_block("start");
     for stmt in func.body {
         match stmt {
@@ -406,12 +434,7 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 rhs,
             } => {
                 let offset = id * 8;
-                generate_expr(
-                    m,
-                    &mut f,
-                    rhs,
-                    Value::Register(Register::Rax),
-                )?;
+                generate_expr(m, &mut f, rhs, Value::Register(Register::Rax))?;
                 f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
             }
             Stmt::Assign {
@@ -435,7 +458,7 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                     exprs.len() < Register::get_syscall_call_convention().len(),
                     "Implement args via stack"
                 );
-                let mut regs = Register::get_syscall_call_convention().into_iter();
+                let regs = Register::get_syscall_call_convention().into_iter();
                 for (expr, reg) in exprs.into_iter().zip(regs).rev() {
                     generate_expr(m, &mut f, expr, Value::Register(reg))?;
                 }
@@ -568,7 +591,7 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 #[derive(Debug, Default)]
 struct Program<'src> {
     funcs: Vec<Func<'src>>,
-    extern_funcs: Vec<Token<'src>>,
+    extern_funcs: Vec<(Token<'src>, Type)>,
     global_vars_table: HashMap<&'src str, Var<'src>>,
 }
 
@@ -577,6 +600,7 @@ struct Func<'src> {
     name: Token<'src>,
     vars_table: HashMap<&'src str, Var<'src>>,
     temp_count: usize,
+    ret_ty : Option<Type>,
     body: Vec<Stmt<'src>>,
 }
 
@@ -701,6 +725,7 @@ enum Expr<'src> {
 enum Type {
     Word,
     Ptr,
+    Fn(Vec<Self>, bool),
     I32,
 }
 
@@ -710,6 +735,7 @@ impl Type {
             Type::Word => 8,
             Type::Ptr => 8,
             Type::I32 => 4,
+            Type::Fn(..) => 8, // Function Pointer
         }
     }
 }
