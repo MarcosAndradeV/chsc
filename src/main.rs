@@ -119,6 +119,17 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
                 let fname = expect_token(ctx, TokenKind::Identifier)?;
                 p.extern_funcs.push(fname);
             }
+            TokenKind::Keyword if token.source == "var" => {
+                let name = expect_token(ctx, TokenKind::Identifier)?;
+                let ty = compile_type(ctx)?;
+                if p.global_vars_table
+                    .insert(name.source, ty)
+                    .is_some()
+                {
+                    eprintln!("{}: Redefinition of global var {}", name.loc, name);
+                    return None;
+                }
+            }
             _ => {
                 eprintln!("{}: Unexpected token {}", token.loc, token);
                 return None;
@@ -143,13 +154,17 @@ fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) ->
             ctx.lexer.next_token();
             break;
         }
-        compile_stmt(ctx, &mut f)?;
+        compile_stmt(ctx, p, &mut f)?;
     }
     p.funcs.push(f);
     Some(())
 }
 
-fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Option<()> {
+fn compile_stmt<'src>(
+    ctx: &mut CompilerContext<'src>,
+    p: &Program<'src>,
+    f: &mut Func<'src>,
+) -> Option<()> {
     let token = ctx.lexer.next_token();
     match token.kind {
         TokenKind::Keyword if token.source == "var" => {
@@ -165,7 +180,7 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
         }
         TokenKind::Keyword if token.source == "return" => {
             if ctx.lexer.peek_token().kind != TokenKind::SemiColon {
-                let expr = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
+                let expr = compile_expr(ctx, p, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
                 f.body.push(Stmt::Return(Some(expr)));
             } else {
                 f.body.push(Stmt::Return(None));
@@ -174,7 +189,7 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
         }
         TokenKind::Keyword if token.source == "if" => {
             expect_token(ctx, TokenKind::OpenParen)?;
-            let cond = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
+            let cond = compile_expr(ctx,p, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
             expect_token(ctx, TokenKind::CloseParen)?;
             expect_token(ctx, TokenKind::OpenBrace)?;
             let if_index = f.body.len();
@@ -189,7 +204,7 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
                     ctx.lexer.next_token();
                     break;
                 }
-                compile_stmt(ctx, f)?;
+                compile_stmt(ctx, p, f)?;
             }
             let false_block_patch = f.body.len();
             if let Some(Stmt::Jz { cond: _, label }) = f.body.get_mut(if_index) {
@@ -201,14 +216,11 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
             expect_token(ctx, TokenKind::OpenParen)?;
             let cond_label = f.body.len();
             f.body.push(Stmt::Block(cond_label));
-            let cond = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
+            let cond = compile_expr(ctx,p, f, Precedence::Lowest, &[TokenKind::CloseParen])?;
             expect_token(ctx, TokenKind::CloseParen)?;
             expect_token(ctx, TokenKind::OpenBrace)?;
             let patch = f.body.len();
-            f.body.push(Stmt::Jnz {
-                cond,
-                label: 0,
-            });
+            f.body.push(Stmt::Jz { cond, label: 0 });
             loop {
                 let token = ctx.lexer.peek_token();
                 if token.is_eof() {
@@ -219,23 +231,26 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
                     ctx.lexer.next_token();
                     break;
                 }
-                compile_stmt(ctx, f)?;
+                compile_stmt(ctx, p, f)?;
             }
-            f.body.push(Stmt::Jmp {
-                label: cond_label,
-            });
+            f.body.push(Stmt::Jmp { label: cond_label });
             let len = f.body.len();
-            if let Some(Stmt::Jnz { cond, label }) = f.body.get_mut(patch) {
+            if let Some(Stmt::Jz { cond, label }) = f.body.get_mut(patch) {
                 *label = len;
             }
             f.body.push(Stmt::Block(len));
         }
         TokenKind::Identifier if ctx.lexer.peek_token().kind == TokenKind::Assign => {
             ctx.lexer.next_token();
-            let lhs = compile_expr(ctx, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
+            let lhs = compile_expr(ctx,p, f, Precedence::Lowest, &[TokenKind::SemiColon])?;
             if let Some((_, offset)) = f.vars_table.get(token.source) {
                 f.body.push(Stmt::Assign {
                     rhs: LValue::Var(token, *offset),
+                    lhs,
+                });
+            } else if let Some(t) = p.global_vars_table.get(token.source) {
+                f.body.push(Stmt::Assign {
+                    rhs: LValue::GlobalVar(token, t.clone()),
                     lhs,
                 });
             } else {
@@ -256,6 +271,7 @@ fn compile_stmt<'src>(ctx: &mut CompilerContext<'src>, f: &mut Func<'src>) -> Op
                     }
                     _ => args.push(compile_expr(
                         ctx,
+                        p,
                         f,
                         Precedence::Lowest,
                         &[TokenKind::CloseParen, TokenKind::Comma],
@@ -283,6 +299,8 @@ fn compile_type(ctx: &mut CompilerContext<'_>) -> Option<Type> {
     }
     match token.kind {
         TokenKind::Identifier if token.source == "word" => Some(Type::Word),
+        TokenKind::Identifier if token.source == "i32" => Some(Type::I32),
+        TokenKind::Identifier if token.source == "ptr" => Some(Type::Ptr),
         _ => {
             eprintln!("{}: Expected type but got {}", token.loc, token);
             return None;
@@ -292,6 +310,7 @@ fn compile_type(ctx: &mut CompilerContext<'_>) -> Option<Type> {
 
 fn compile_expr<'src>(
     ctx: &mut CompilerContext<'src>,
+    p: &Program<'src>,
     f: &mut Func<'src>,
     precedence: Precedence,
     stop: &[TokenKind],
@@ -303,18 +322,23 @@ fn compile_expr<'src>(
         TokenKind::Identifier => {
             if let Some((_, offset)) = f.vars_table.get(token.source) {
                 Expr::Var(token, *offset)
+            } else if let Some(t) = p.global_vars_table.get(token.source) {
+                Expr::GlobalVar(token, t.clone())
             } else {
                 eprintln!("{}: Undefined var {}", token.loc, token);
                 return None;
             }
         }
-        _ => todo!(),
+        _ => {
+            eprintln!("{}: Expected expression but got {}", token.loc, token);
+            return None;
+        }
     };
     while !next_token_is(ctx, stop)? && precedence < peek_infix_precedence(ctx) {
         let token = ctx.lexer.next_token();
         let infix = {
             let precedence = Precedence::from_token_kind(&token.kind);
-            let right = compile_expr(ctx, f, precedence, stop)?;
+            let right = compile_expr(ctx,p, f, precedence, stop)?;
             let id = f.temp_count;
             f.temp_count += 1;
             f.body.push(Stmt::Binop {
@@ -342,12 +366,20 @@ fn generate(p: Program) -> Option<Module> {
         generate_func(func, &mut m)?
     }
 
+    for (name, t) in p.global_vars_table {
+        m.push_data(DataDef::new(
+            format!("_{name}"),
+            DataDirective::Rq,
+            vec![DataExpr::Const(t.size() as u64)],
+        ));
+    }
+
     Some(m)
 }
 
 fn generate_func(func: Func, m: &mut Module) -> Option<()> {
     let mut f = Function::new(true, func.name.source);
-    f.allocate_stack((func.vars_table.len() + func.temp_count) * 8);
+    f.allocate_stack((func.temp_count) * 8);
     f.push_block("start");
     for stmt in func.body {
         match stmt {
@@ -359,6 +391,13 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 let offset = id * 8;
                 f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
             }
+            Stmt::Assign {
+                rhs: LValue::GlobalVar(token, s),
+                lhs,
+            } => {
+                generate_expr(m, &mut f, lhs, Register::Rax)?;
+                f.push_raw_instr(format!("mov QWORD [_{token}], rax"));
+            }
             Stmt::Return(expr) => {
                 if let Some(expr) = expr {
                     generate_expr(m, &mut f, expr, Register::Rax)?;
@@ -368,13 +407,17 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 f.push_raw_instr("ret");
             }
             Stmt::Funcall(token, exprs) => {
-                let call_conv_len = Register::get_syscall_call_convention().len();
+                assert!(
+                    exprs.len() < Register::get_syscall_call_convention().len(),
+                    "Implement args via stack"
+                );
                 let mut regs = Register::get_syscall_call_convention().into_iter();
-                assert!(exprs.len() < call_conv_len, "Implement args via stack");
-                for expr in exprs {
-                    let reg = regs.next().unwrap();
+                for (expr, reg) in exprs.into_iter().zip(regs).rev() {
                     generate_expr(m, &mut f, expr, reg)?;
                 }
+
+                // x86_64 Linux ABI passes the amount of floating point args via al.
+                f.push_raw_instr("mov al, 0");
                 f.push_raw_instr(format!("call _{token}"));
             }
             Stmt::Binop {
@@ -384,13 +427,16 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                 rhs,
                 lhs,
             } => {
-                generate_expr(m, &mut f, lhs, Register::Rbx)?;
-                generate_expr(m, &mut f, rhs, Register::Rax)?;
+                generate_expr(m, &mut f, lhs, Register::Rax)?;
+                generate_expr(m, &mut f, rhs, Register::Rbx)?;
                 let offset = result * 8;
                 let mut out_reg = Register::Rax;
                 match operator {
                     BinaryOperator::Add => f.push_raw_instr("add rax, rbx"),
-                    BinaryOperator::Mul => f.push_raw_instr("imul rax, rbx"),
+                    BinaryOperator::Mul => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr("imul rbx")
+                    }
                     BinaryOperator::Sub => f.push_raw_instr("sub rax, rbx"),
                     BinaryOperator::Mod => {
                         f.push_raw_instr("cqo");
@@ -405,6 +451,12 @@ fn generate_func(func: Func, m: &mut Module) -> Option<()> {
                         f.push_raw_instr("xor rdx, rdx");
                         f.push_raw_instr("cmp rax, rbx");
                         f.push_raw_instr("setl dl");
+                        out_reg = Register::Rdx;
+                    }
+                    BinaryOperator::Eq => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr("cmp rax, rbx");
+                        f.push_raw_instr("sete dl");
                         out_reg = Register::Rdx;
                     }
                 }
@@ -444,6 +496,9 @@ fn generate_expr<'src>(m: &mut Module, f: &mut Function, expr: Expr, reg: Regist
         Expr::Var(_, id) => {
             let offset = id * 8;
             f.push_raw_instr(format!("mov {reg}, [rbp-{offset}]"));
+        }
+        Expr::GlobalVar(token, _) => {
+            f.push_raw_instr(format!("mov {reg}, [_{token}]"));
         }
         Expr::IntLit(token) => {
             f.push_raw_instr(format!("mov {reg}, {token}"));
@@ -490,6 +545,7 @@ fn expect_token<'src>(ctx: &mut CompilerContext<'src>, kind: TokenKind) -> Optio
 struct Program<'src> {
     funcs: Vec<Func<'src>>,
     extern_funcs: Vec<Token<'src>>,
+    global_vars_table: HashMap<&'src str, Type>,
 }
 
 #[derive(Debug, Default)]
@@ -545,7 +601,9 @@ enum BinaryOperator {
     Mul,
     Div,
     Mod,
+
     Less,
+    Eq,
 }
 
 impl BinaryOperator {
@@ -557,6 +615,7 @@ impl BinaryOperator {
             TokenKind::Mod => Some(Self::Mod),
             TokenKind::Slash => Some(Self::Div),
             TokenKind::Lt => Some(Self::Less),
+            TokenKind::Eq => Some(Self::Eq),
             _ => {
                 eprintln!("{}: {} is not a binary operator", token.loc, token);
                 None
@@ -582,7 +641,8 @@ impl Precedence {
         match kind {
             TokenKind::Plus | TokenKind::Minus => Self::Sum,
             TokenKind::Asterisk | TokenKind::Slash | TokenKind::Mod => Self::Factor,
-            TokenKind::Lt => Self::Comparison,
+            TokenKind::Lt | TokenKind::Gt => Self::Comparison,
+            TokenKind::Eq => Self::Equality,
             _ => Self::Lowest,
         }
     }
@@ -594,6 +654,7 @@ type VarId = usize;
 enum Expr<'src> {
     Temp(usize),
     Var(Token<'src>, VarId),
+    GlobalVar(Token<'src>, Type),
     IntLit(Token<'src>),
     StrLit(Token<'src>),
 }
@@ -601,9 +662,22 @@ enum Expr<'src> {
 #[derive(Debug)]
 enum LValue<'src> {
     Var(Token<'src>, VarId),
+    GlobalVar(Token<'src>, Type),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Type {
     Word,
+    Ptr,
+    I32,
+}
+
+impl Type {
+    pub fn size(&self) -> usize {
+        match self {
+            Type::Word => 8,
+            Type::Ptr => 8,
+            Type::I32 => 4,
+        }
+    }
 }
