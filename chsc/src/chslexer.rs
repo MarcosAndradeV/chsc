@@ -157,6 +157,10 @@ impl<'src> Lexer<'src> {
                     while self.advance() != b'\n' {}
                     continue;
                 }
+                b'#' => {
+                    while self.advance() != b'\n' {}
+                    continue;
+                }
                 b'-' if self.read_char() == b'>' => {
                     self.advance();
                     Token::new(TokenKind::Arrow, loc, self.source[begin..self.pos].into())

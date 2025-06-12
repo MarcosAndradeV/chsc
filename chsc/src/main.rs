@@ -2,6 +2,7 @@
 #![allow(unused)]
 
 use std::collections::HashSet;
+use std::env::current_dir;
 use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, process::Command};
 
 use crate::chslexer::*;
@@ -10,6 +11,8 @@ use crate::fasm_backend::{DataDef, DataDirective, DataExpr, Function, Module, Re
 
 mod chslexer;
 mod fasm_backend;
+
+const STDLIB_PATH: &str = "stdlib";
 
 fn main() {
     let mut args = args();
@@ -20,7 +23,12 @@ fn main() {
         return;
     };
 
-    let Ok(source) = fs::read_to_string(&file_path) else {
+    let chsi_path = PathBuf::from(&file_path).with_extension("chsi");
+    let Ok(_) = run_cpp(&file_path, &chsi_path) else {
+        return;
+    };
+
+    let Ok(source) = fs::read_to_string(&chsi_path) else {
         eprintln!("Cannot read file `{file_path}`");
         return;
     };
@@ -48,6 +56,32 @@ fn main() {
     let Ok(_) = run_cc(&o_path, &exe_path, ["-no-pie"]) else {
         return;
     };
+}
+
+fn run_cpp<I, O>(input_path: I, output_path: O) -> Result<(), ()>
+where
+    I: AsRef<OsStr>,
+    O: AsRef<OsStr>,
+{
+    let mut cpp_command = Command::new("cpp");
+    cpp_command
+        .arg("-o")
+        .arg(output_path)
+        .arg(input_path)
+        .arg("-I/home/marcos/Projects/chsc/stdlib");
+
+    let output = cpp_command
+        .output()
+        .map_err(|e| eprintln!("Failed to run cc: {}", e))?;
+    if !output.status.success() {
+        eprintln!(
+            "cpp failed to generate\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(());
+    }
+    Ok(())
 }
 
 fn run_cc<I, O, A, F>(input_path: I, output_path: O, compiler_flags: F) -> Result<(), ()>
