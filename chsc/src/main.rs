@@ -2,7 +2,8 @@
 #![allow(unused)]
 
 use std::collections::HashSet;
-use std::env::current_dir;
+use std::env::{self, current_dir};
+use std::fmt::Display;
 use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, process::Command};
 
 use crate::chslexer::*;
@@ -16,55 +17,78 @@ const STDLIB_PATH: &str = "stdlib";
 
 fn main() {
     let mut args = args();
-    let program = args.next().expect("program");
+    let program = args.next().expect("Executable name missing");
 
-    let Some(file_path) = args.next() else {
-        eprintln!("Usage: {program} <input>");
-        return;
+    let file_path = match args.next() {
+        Some(path) => path,
+        None => {
+            eprintln!("Usage: {program} <input>");
+            return;
+        }
     };
 
-    let stdlib_path = std::env::var("CHS_STDLIB_PATH").unwrap_or("./stdlib".to_string());
+    let stdlib_path = env::var("CHS_STDLIB_PATH").unwrap_or_else(|_| "./stdlib".to_string());
 
     let chsi_path = PathBuf::from(&file_path).with_extension("chsi");
-    let Ok(_) = run_cpp(&file_path, &chsi_path, &[format!("-I{}", stdlib_path)]) else {
+    if run_cpp(&file_path, &chsi_path, &[stdlib_path]).is_err() {
+        eprintln!("C preprocessing failed.");
         return;
+    }
+
+    let source = match fs::read_to_string(&chsi_path) {
+        Ok(content) => content,
+        Err(_) => {
+            eprintln!("Cannot read file `{}`", file_path);
+            return;
+        }
     };
 
-    let Ok(source) = fs::read_to_string(&chsi_path) else {
-        eprintln!("Cannot read file `{file_path}`");
-        return;
+    let mut lexer = PeekableLexer::new(&file_path, &source);
+    lexer.set_is_keyword_fn(|k| matches!(k, "fn" | "var" | "return" | "extern" | "if" | "while"));
+
+    let mut ctx = CompilerContext::new(&mut lexer);
+
+    let program_ast = match compile(&mut ctx) {
+        Some(p) => p,
+        None => {
+            eprintln!("Compilation failed.");
+            return;
+        }
     };
 
-    let mut l = PeekableLexer::new(&file_path, &source);
-    l.set_is_keyword_fn(|k| matches!(k, "fn" | "var" | "return" | "extern" | "if" | "while"));
-    let mut ctx = CompilerContext::new(&mut l);
-    let Some(p) = compile(&mut ctx) else {
-        return;
-    };
-
-    let Some(m) = generate(p) else {
-        return;
+    let machine_code = match generate(program_ast) {
+        Some(m) => m,
+        None => {
+            eprintln!("Code generation failed.");
+            return;
+        }
     };
 
     let asm_path = PathBuf::from(&file_path).with_extension("asm");
     let o_path = PathBuf::from(&file_path).with_extension("o");
     let exe_path = PathBuf::from(&file_path).with_extension("");
-    let _ = fs::write(&asm_path, m.to_string());
 
-    let Ok(_) = run_fasm(&asm_path, &o_path) else {
+    if let Err(e) = fs::write(&asm_path, machine_code.to_string()) {
+        eprintln!("Failed to write assembly file: {e}");
         return;
-    };
+    }
 
-    let Ok(_) = run_cc(&o_path, &exe_path, ["-no-pie"]) else {
+    if run_fasm(&asm_path, &o_path).is_err() {
+        eprintln!("Assembly with FASM failed.");
         return;
-    };
+    }
+
+    if run_cc(&o_path, &exe_path, ["-no-pie"]).is_err() {
+        eprintln!("Linking with cc failed.");
+        return;
+    }
 }
 
 fn run_cpp<I, O, Inc, Ps>(input_path: I, output_path: O, include_paths: Ps) -> Result<(), ()>
 where
     I: AsRef<OsStr>,
     O: AsRef<OsStr>,
-    Inc: AsRef<OsStr>,
+    Inc: AsRef<OsStr> + Display,
     Ps: IntoIterator<Item = Inc>,
 {
     let mut cpp_command = Command::new("cpp");
@@ -73,7 +97,7 @@ where
         .arg(output_path)
         .arg(input_path);
 
-    cpp_command.args(include_paths);
+    cpp_command.args(include_paths.into_iter().map(|i| format!("-I{i}")));
 
     let output = cpp_command
         .output()
