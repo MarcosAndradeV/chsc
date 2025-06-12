@@ -20,6 +20,7 @@ fn main() {
     let program = args.next().expect("Executable name missing");
 
     let mut include_paths = Vec::new();
+    let mut compiler_flags = vec!["-no-pie".to_string()];
     let mut run = false;
     let mut file_path: Option<String> = None;
 
@@ -35,6 +36,17 @@ fn main() {
             }
             _ if arg.starts_with("-I") => {
                 include_paths.push(arg[2..].to_string());
+            }
+            "-C" => {
+                if let Some(path) = args.next() {
+                    compiler_flags.push(path);
+                } else {
+                    eprintln!("Expected flag after -C");
+                    return;
+                }
+            }
+            _ if arg.starts_with("-C") => {
+                compiler_flags.push(arg[2..].to_string());
             }
             "-r" => {
                 run = true;
@@ -109,7 +121,7 @@ fn main() {
         return;
     }
 
-    if run_cc(&o_path, &exe_path, ["-no-pie"]).is_err() {
+    if run_cc(&o_path, &exe_path, compiler_flags).is_err() {
         eprintln!("Linking with cc failed.");
         return;
     }
