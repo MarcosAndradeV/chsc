@@ -23,8 +23,10 @@ fn main() {
         return;
     };
 
+    let stdlib_path = std::env::var("CHS_STDLIB_PATH").unwrap_or("./stdlib".to_string());
+
     let chsi_path = PathBuf::from(&file_path).with_extension("chsi");
-    let Ok(_) = run_cpp(&file_path, &chsi_path) else {
+    let Ok(_) = run_cpp(&file_path, &chsi_path, &[format!("-I{}", stdlib_path)]) else {
         return;
     };
 
@@ -58,17 +60,20 @@ fn main() {
     };
 }
 
-fn run_cpp<I, O>(input_path: I, output_path: O) -> Result<(), ()>
+fn run_cpp<I, O, Inc, Ps>(input_path: I, output_path: O, include_paths: Ps) -> Result<(), ()>
 where
     I: AsRef<OsStr>,
     O: AsRef<OsStr>,
+    Inc: AsRef<OsStr>,
+    Ps: IntoIterator<Item = Inc>,
 {
     let mut cpp_command = Command::new("cpp");
     cpp_command
         .arg("-o")
         .arg(output_path)
-        .arg(input_path)
-        .arg("-I/home/marcos/Projects/chsc/stdlib");
+        .arg(input_path);
+
+    cpp_command.args(include_paths);
 
     let output = cpp_command
         .output()
