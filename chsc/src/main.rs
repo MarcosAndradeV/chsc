@@ -19,18 +19,49 @@ fn main() {
     let mut args = args();
     let program = args.next().expect("Executable name missing");
 
-    let file_path = match args.next() {
-        Some(path) => path,
+    let mut include_paths = Vec::new();
+    let mut run = false;
+    let mut file_path: Option<String> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-I" => {
+                if let Some(path) = args.next() {
+                    include_paths.push(path);
+                } else {
+                    eprintln!("Expected path after -I");
+                    return;
+                }
+            }
+            _ if arg.starts_with("-I") => {
+                include_paths.push(arg[2..].to_string());
+            }
+            "-r" => {
+                run = true;
+            }
+            _ => {
+                if file_path.is_some() {
+                    eprintln!("Unexpected extra argument: {arg}");
+                    return;
+                }
+                file_path = Some(arg);
+            }
+        }
+    }
+
+    let file_path = match file_path {
+        Some(p) => p,
         None => {
-            eprintln!("Usage: {program} <input>");
+            eprintln!("Usage: {program} [-I path]... <input>");
             return;
         }
     };
 
     let stdlib_path = env::var("CHS_STDLIB_PATH").unwrap_or_else(|_| "./stdlib".to_string());
+    include_paths.push(stdlib_path);
 
     let chsi_path = PathBuf::from(&file_path).with_extension("chsi");
-    if run_cpp(&file_path, &chsi_path, &[stdlib_path]).is_err() {
+    if run_cpp(&file_path, &chsi_path, include_paths).is_err() {
         eprintln!("C preprocessing failed.");
         return;
     }
@@ -82,6 +113,12 @@ fn main() {
         eprintln!("Linking with cc failed.");
         return;
     }
+
+    if run {
+        if run_exe(&exe_path.to_string_lossy().to_string()).is_err() {
+            return;
+        }
+    }
 }
 
 fn run_cpp<I, O, Inc, Ps>(input_path: I, output_path: O, include_paths: Ps) -> Result<(), ()>
@@ -92,10 +129,7 @@ where
     Ps: IntoIterator<Item = Inc>,
 {
     let mut cpp_command = Command::new("cpp");
-    cpp_command
-        .arg("-o")
-        .arg(output_path)
-        .arg(input_path);
+    cpp_command.arg("-o").arg(output_path).arg(input_path);
 
     cpp_command.args(include_paths.into_iter().map(|i| format!("-I{i}")));
 
@@ -153,6 +187,25 @@ fn run_fasm<I: AsRef<OsStr>, O: AsRef<OsStr>>(input_path: I, output_path: O) -> 
             String::from_utf8_lossy(&output.stderr)
         );
         return Err(());
+    }
+    Ok(())
+}
+
+fn run_exe<I: AsRef<OsStr> + Display>(input_path: I) -> Result<(), ()> {
+    let mut command = Command::new(format!("./{}", &input_path));
+
+    let output = command
+        .output()
+        .map_err(|e| eprintln!("Failed to run {}: {}", input_path, e))?;
+    if !output.status.success() {
+        eprintln!(
+            "\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(());
+    } else {
+        print!("{}", String::from_utf8_lossy(&output.stdout),);
     }
     Ok(())
 }
