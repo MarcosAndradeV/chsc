@@ -1,4 +1,4 @@
-extern fn printf(ptr, ...) -> i32;
+#include <libc.chs>
 
 fn main() -> i32 {
     printf("Hello, World!\n");

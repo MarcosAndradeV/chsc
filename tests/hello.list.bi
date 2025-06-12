@@ -15,8 +15,8 @@ Hello, 69 World!
 
 :b stderr 0
 
-:b shell 44
-rm tests/hello tests/hello.o tests/hello.asm
+:b shell 61
+rm tests/hello tests/hello.chsi tests/hello.o tests/hello.asm
 :i returncode 0
 :b stdout 0
 
