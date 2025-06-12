@@ -98,6 +98,7 @@ struct CompilerContext<'src> {
     lexer: &'src mut PeekableLexer<'src>,
     vars_index: VarsIndex<'src>,
     funcs_index: FuncIndex<'src>,
+    attr_index: AttrIndex<'src>,
 }
 
 impl<'src> CompilerContext<'src> {
@@ -106,6 +107,7 @@ impl<'src> CompilerContext<'src> {
             lexer,
             vars_index: VarsIndex::default(),
             funcs_index: FuncIndex::default(),
+            attr_index: AttrIndex::default(),
         }
     }
 }
@@ -113,7 +115,6 @@ impl<'src> CompilerContext<'src> {
 fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
     let mut p = Program::default();
     ctx.vars_index.push_scope();
-    let mut attr_stack: HashMap<&'src str, Option<&'src str>> = HashMap::new();
 
     loop {
         let token = ctx.lexer.next_token();
@@ -123,16 +124,8 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
         }
 
         match token.kind {
-            TokenKind::MacroCall => {
-                let name = &token.source[1..token.source.len()];
-                attr_stack.insert(name, None);
-            }
-            TokenKind::MacroCallWithArgs => {
-                let idx = token.source.find("(").unwrap();
-                let name = &token.source[1..idx];
-                let val = &token.source[idx + 1..token.source.len() - 1];
-                attr_stack.insert(name, Some(val));
-            }
+            TokenKind::MacroCall => compile_attr1(ctx, token),
+            TokenKind::MacroCallWithArgs => compile_attr2(ctx, token),
             TokenKind::Keyword if token.source == "fn" => {
                 compile_func(ctx, &mut p)?;
             }
@@ -210,6 +203,19 @@ fn compile<'src>(ctx: &mut CompilerContext<'src>) -> Option<Program<'src>> {
             }
         }
     }
+}
+
+fn compile_attr1<'src>(ctx: &mut CompilerContext<'src>, token: Token<'src>) {
+    let name = &token.source[1..token.source.len()];
+    ctx.attr_index.0.insert(name, None);
+}
+
+fn compile_attr2<'src>(ctx: &mut CompilerContext<'src>, token: Token<'src>) {
+    let idx = token.source.find("(").unwrap();
+    let last_idx = token.source.find(")").unwrap();
+    let name = &token.source[1..idx];
+    let val = &token.source[idx + 1..last_idx - 1];
+    ctx.attr_index.0.insert(name, Some(val));
 }
 
 fn compile_func<'src>(ctx: &mut CompilerContext<'src>, p: &mut Program<'src>) -> Option<()> {
@@ -843,6 +849,8 @@ struct Program<'src> {
 struct VarsIndex<'src>(pub Vec<HashMap<&'src str, VarId>>);
 #[derive(Debug, Default)]
 struct FuncIndex<'src>(pub HashMap<&'src str, FuncId>);
+#[derive(Debug, Default)]
+struct AttrIndex<'src>(pub HashMap<&'src str, Option<&'src str>>);
 
 impl<'src> VarsIndex<'src> {
     pub fn push_scope(&mut self) {
