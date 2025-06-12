@@ -1,0 +1,3 @@
+cargo run -q --bin chsc -- tests/hello.chs
+tests/hello
+rm tests/hello tests/hello.o tests/hello.asm
