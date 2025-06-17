@@ -1,0 +1,2 @@
+cargo run -q --bin chsc -- -r tests/while.chs
+rm tests/while tests/while.chsi tests/while.o tests/while.asm
