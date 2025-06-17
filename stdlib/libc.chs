@@ -1,9 +1,9 @@
 #ifndef CHS_LIBC
 #define CHS_LIBC
 
-extern fn puts(ptr);
-extern fn printf(ptr, ...) -> i32;
-extern fn malloc(word) -> ptr;
+extern fn puts(str);
+extern fn printf(str, ...);
+extern fn malloc(size);
 extern fn free(ptr);
 
 #endif
