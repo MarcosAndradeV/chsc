@@ -2,9 +2,9 @@
 :b shell 45
 cargo run -q --bin chsc -- -r tests/hello.chs
 :i returncode 0
-:b stdout 31
-Hello, World!
-Hello, 69 World!
+:b stdout 29
+Hello, world
+Hello, 42 world
 
 :b stderr 0
 

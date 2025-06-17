@@ -1,7 +1,7 @@
 #include <libc.chs>
 
-fn main() -> i32 {
-    printf("Hello, World!\n");
-    printf("Hello, %d World!\n", 69);
+fn main() {
+    printf("Hello, world\n");
+    printf("Hello, %d world\n", 42);
     return 0;
 }
