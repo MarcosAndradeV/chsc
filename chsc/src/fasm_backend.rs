@@ -1,6 +1,7 @@
+#![allow(dead_code)]
+#![allow(unused)]
 use std::fmt;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeOperator {
     Byte,

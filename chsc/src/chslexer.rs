@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(unused)]
 use std::fmt;
 
 pub fn is_keyword_default(_: &str) -> bool {
