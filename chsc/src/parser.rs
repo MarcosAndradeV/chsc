@@ -282,7 +282,7 @@ fn parse_stmt<'src>(
                 &[TokenKind::SemiColon],
             )?;
             expect(lexer, TokenKind::SemiColon, None::<&str>)?;
-            curr_fn.body.push(dbg!(Stmt::Assign { lhs, rhs }));
+            curr_fn.body.push(Stmt::Assign { lhs, rhs });
 
             Ok(())
         }
