@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use std::env::consts::OS;
 use std::{collections::HashMap, env::args, fs, path::PathBuf};
 
+use fasm_backend::{Cond, Instr};
+
 use crate::ast::*;
 use crate::chslexer::*;
 
@@ -155,7 +157,10 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                         let name = token.source;
                         f.push_raw_instr(format!("call _{name}"));
                     }
-                    Expr::IntLit(token) | Expr::StrLit(token) | Expr::Deref(token, _) => {
+                    Expr::IntLit(token)
+                    | Expr::StrLit(token)
+                    | Expr::Deref(token, _)
+                    | Expr::Ref(token, _) => {
                         return Err(AppError::GenerationError(
                             Some(format!(
                                 "{}: call arbitrary expressions is not supported yet",
@@ -171,6 +176,25 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                     f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
                 }
             }
+            Stmt::Unop {
+                result,
+                operator,
+                operand,
+            } => {
+                generate_expr(m, &mut f, &vars, operand, Value::Register(Register::Rax));
+                let offset = result.0 * 8;
+                let mut out_reg = Register::Rax;
+                match operator.kind {
+                    TokenKind::Bang => {
+                        f.push_raw_instr("xor rbx, rbx");
+                        f.push_raw_instr("test rax, rax");
+                        f.push_instr(Instr::Set(Cond::Z, Value::Register(Register::Bl)));
+                        out_reg = Register::Rbx;
+                    }
+                    _ => todo!(),
+                }
+                f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {out_reg}"));
+            }
             Stmt::Binop {
                 result,
                 operator,
@@ -183,11 +207,11 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 let mut out_reg = Register::Rax;
                 match operator.kind {
                     TokenKind::Plus => f.push_raw_instr("add rax, rbx"),
+                    TokenKind::Minus => f.push_raw_instr("sub rax, rbx"),
                     TokenKind::Asterisk => {
                         f.push_raw_instr("xor rdx, rdx");
                         f.push_raw_instr("imul rbx")
                     }
-                    TokenKind::Minus => f.push_raw_instr("sub rax, rbx"),
                     TokenKind::Percent => {
                         f.push_raw_instr("cqo");
                         f.push_raw_instr("idiv rbx");
@@ -200,13 +224,19 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                     TokenKind::Lt => {
                         f.push_raw_instr("xor rdx, rdx");
                         f.push_raw_instr("cmp rax, rbx");
-                        f.push_raw_instr("setl dl");
+                        f.push_instr(Instr::Set(Cond::L, Value::Register(Register::Dl)));
                         out_reg = Register::Rdx;
                     }
                     TokenKind::Eq => {
                         f.push_raw_instr("xor rdx, rdx");
                         f.push_raw_instr("cmp rax, rbx");
-                        f.push_raw_instr("sete dl");
+                        f.push_instr(Instr::Set(Cond::E, Value::Register(Register::Dl)));
+                        out_reg = Register::Rdx;
+                    }
+                    TokenKind::NotEq => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr("cmp rax, rbx");
+                        f.push_instr(Instr::Set(Cond::NE, Value::Register(Register::Dl)));
                         out_reg = Register::Rdx;
                     }
                     _ => todo!(),
@@ -236,7 +266,7 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                         f.push_raw_instr(format!("mov QWORD [rax], rbx"));
                     }
                 }
-                _ => todo!(),
+                _ => todo!("{lhs:?}"),
             },
             Stmt::Block(id) => {
                 f.push_block(format!("b{id}"));
@@ -295,6 +325,15 @@ fn generate_expr<'src>(
                 let offset = var_id * 8;
                 f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
                 f.push_raw_instr(format!("mov {val}, [{val}]"));
+            }
+        }
+        Expr::Ref(token, VarId(var_id, is_extern)) => {
+            if is_extern {
+                let name = token.source;
+                f.push_raw_instr(format!("lea {val}, QWORD _{name}"));
+            } else {
+                let offset = var_id * 8;
+                f.push_raw_instr(format!("lea {val}, [rbp-{offset}]"));
             }
         }
     }

@@ -100,6 +100,11 @@ pub enum Stmt<'src> {
         rhs: Expr<'src>,
     },
     Return(Option<Expr<'src>>),
+    Unop {
+        result: VarId,
+        operator: Token<'src>,
+        operand: Expr<'src>,
+    },
     Binop {
         result: VarId,
         operator: Token<'src>,
@@ -126,6 +131,7 @@ pub enum Expr<'src> {
     StrLit(Token<'src>),
     Var(Token<'src>, VarId),
     Deref(Token<'src>, VarId),
+    Ref(Token<'src>, VarId),
 }
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -136,20 +142,46 @@ pub enum Precedence {
     LogicalAnd,
     Equality,
     Comparison,
+    BitWiseOr,
+    BitWiseXor,
+    BitWiseAnd,
+    BitWiseShift,
     Sum,
     Factor,
-    Deref,
-    Call
+    RefDeref,
+    NegNot,
+    Call,
+    Highest,
 }
 
 impl Precedence {
     pub fn from_token_kind(kind: &TokenKind) -> Precedence {
+        use TokenKind::*;
+
         match kind {
-            TokenKind::Plus | TokenKind::Minus => Self::Sum,
-            TokenKind::Asterisk | TokenKind::Slash | TokenKind::Percent => Self::Factor,
-            TokenKind::Lt | TokenKind::Gt => Self::Comparison,
-            TokenKind::Eq => Self::Equality,
-            _ => Self::Lowest
+            Assign  => Self::Assignment,
+
+            DoublePipe => Self::LogicalOr,
+            DoubleAmpersand => Self::LogicalAnd,
+
+            Eq | NotEq => Self::Equality,
+            Lt | Gt | LtEq | GtEq => Self::Comparison,
+
+            Pipe => Self::BitWiseOr,
+            Caret => Self::BitWiseXor,
+            Ampersand => Self::BitWiseAnd,
+            ShiftLeft | ShiftRight => Self::BitWiseShift,
+
+            Plus | Minus => Self::Sum,
+            Asterisk | Slash | Percent => Self::Factor,
+
+            Bang | Tilde => Self::NegNot,
+
+            OpenParen | OpenBracket => Self::Call,
+
+            Caret | Ampersand => Self::RefDeref,
+
+            _ => Self::Lowest,
         }
     }
 }

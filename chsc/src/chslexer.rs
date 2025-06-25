@@ -171,6 +171,14 @@ impl<'src> Lexer<'src> {
                     self.advance();
                     Token::new(TokenKind::Eq, loc, self.source[begin..self.pos].into())
                 }
+                b'<' if self.read_char() == b'=' => {
+                    self.advance();
+                    Token::new(TokenKind::LtEq, loc, self.source[begin..self.pos].into())
+                }
+                b'>' if self.read_char() == b'=' => {
+                    self.advance();
+                    Token::new(TokenKind::GtEq, loc, self.source[begin..self.pos].into())
+                }
                 b'!' if self.read_char() == b'=' => {
                     self.advance();
                     Token::new(TokenKind::NotEq, loc, self.source[begin..self.pos].into())
@@ -187,6 +195,22 @@ impl<'src> Lexer<'src> {
                     self.advance();
                     Token::new(
                         TokenKind::DoublePipe,
+                        loc,
+                        self.source[begin..self.pos].into(),
+                    )
+                }
+                b'<' if self.read_char() == b'<' => {
+                    self.advance();
+                    Token::new(
+                        TokenKind::ShiftLeft,
+                        loc,
+                        self.source[begin..self.pos].into(),
+                    )
+                }
+                b'>' if self.read_char() == b'>' => {
+                    self.advance();
+                    Token::new(
+                        TokenKind::ShiftRight,
                         loc,
                         self.source[begin..self.pos].into(),
                     )
@@ -228,6 +252,7 @@ impl<'src> Lexer<'src> {
                 b'+' => Token::new(TokenKind::Plus, loc, self.source[begin..self.pos].into()),
                 b'-' => Token::new(TokenKind::Minus, loc, self.source[begin..self.pos].into()),
                 b'.' => Token::new(TokenKind::Dot, loc, self.source[begin..self.pos].into()),
+                b'~' => Token::new(TokenKind::Tilde, loc, self.source[begin..self.pos].into()),
                 b'*' => Token::new(
                     TokenKind::Asterisk,
                     loc,
@@ -236,7 +261,7 @@ impl<'src> Lexer<'src> {
                 b'/' => Token::new(TokenKind::Slash, loc, self.source[begin..self.pos].into()),
                 b'%' => Token::new(TokenKind::Percent, loc, self.source[begin..self.pos].into()),
                 b'$' => Token::new(TokenKind::Dollar, loc, self.source[begin..self.pos].into()),
-                b'^' => Token::new(TokenKind::Circumflex, loc, self.source[begin..self.pos].into()),
+                b'^' => Token::new(TokenKind::Caret, loc, self.source[begin..self.pos].into()),
                 b'&' => Token::new(
                     TokenKind::Ampersand,
                     loc,
@@ -617,7 +642,7 @@ pub enum TokenKind {
     StringLiteral,
     CharacterLiteral,
 
-    Dot,
+    Dot,Tilde,
     Splat,
     Comma,
     Colon,
@@ -625,7 +650,7 @@ pub enum TokenKind {
     SemiColon,
     Arrow,
     BackSlash,
-    Circumflex,
+    Caret,
 
     Assign,
     Bang,
@@ -636,7 +661,9 @@ pub enum TokenKind {
     Eq,
     NotEq,
     Gt,
+    GtEq,
     Lt,
+    LtEq,
     Percent,
     Ampersand,
     Pipe,
@@ -644,6 +671,8 @@ pub enum TokenKind {
     DoublePipe,
 
     Dollar,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
