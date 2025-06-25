@@ -260,9 +260,9 @@ fn create_test_file(file_path: &Path) -> Result<File, ()> {
 }
 
 fn write_tests_to_file(f: &mut File, test_file_path: &Path) -> Result<(), ()> {
-    let comp_cmd = format!("cargo run -q --bin chsc -- -r {}\n", test_file_path.display());
+    let comp_cmd = format!("cargo run -q --bin chsc -- -r --use-c {}\n", test_file_path.display());
     let test_file_path = format!("{}", test_file_path.with_extension("").display());
-    let rm_cmd = format!("rm {} {}.chsi {}.o {}.asm\n", test_file_path, test_file_path, test_file_path, test_file_path);
+    let rm_cmd = format!("rm {} {}.o {}.asm\n", test_file_path, test_file_path, test_file_path);
 
     f.write_all(comp_cmd.as_bytes()).map_err(|e| {
         eprintln!("[ERROR] Failed to write to file: {}", e);

@@ -1,4 +1,4 @@
-#include <libc.chs>
+extern printf;
 
 fn main() {
     var i;

@@ -1,2 +1,2 @@
-cargo run -q --bin chsc -- -r tests/ifs.chs
-rm tests/ifs tests/ifs.chsi tests/ifs.o tests/ifs.asm
+cargo run -q --bin chsc -- -r --use-c tests/ifs.chs
+rm tests/ifs tests/ifs.o tests/ifs.asm
