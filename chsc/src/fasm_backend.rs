@@ -149,11 +149,11 @@ impl fmt::Display for Register {
 }
 
 impl Register {
-    pub const fn get_syscall_call_convention() -> [Self; 6] {
+    pub const fn get_call_convention() -> [Self; 6] {
         use Register::*;
         [Rdi, Rsi, Rdx, R10, R8, R9]
     }
-    pub const fn get_syscall_call_convention_with_rax() -> [Self; 7] {
+    pub const fn get_syscall_call_convention() -> [Self; 7] {
         use Register::*;
         [Rax, Rdi, Rsi, Rdx, R10, R8, R9]
     }

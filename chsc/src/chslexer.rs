@@ -19,7 +19,7 @@ pub fn is_binop_default(op: &TokenKind) -> bool {
             | NotEq
             | Gt
             | Lt
-            | Mod
+            | Percent
             | Ampersand
             | Pipe
             | DoubleAmpersand
@@ -234,8 +234,9 @@ impl<'src> Lexer<'src> {
                     self.source[begin..self.pos].into(),
                 ),
                 b'/' => Token::new(TokenKind::Slash, loc, self.source[begin..self.pos].into()),
-                b'%' => Token::new(TokenKind::Mod, loc, self.source[begin..self.pos].into()),
+                b'%' => Token::new(TokenKind::Percent, loc, self.source[begin..self.pos].into()),
                 b'$' => Token::new(TokenKind::Dollar, loc, self.source[begin..self.pos].into()),
+                b'^' => Token::new(TokenKind::Circumflex, loc, self.source[begin..self.pos].into()),
                 b'&' => Token::new(
                     TokenKind::Ampersand,
                     loc,
@@ -506,7 +507,7 @@ impl fmt::Display for Token<'_> {
             TokenKind::UnknowIntergerLiteral => {
                 write!(
                     f,
-                    "Unknow Interger Literal `{}`",
+                    "Unknown Integer Literal `{}`",
                     self.source.escape_default()
                 )
             }
@@ -624,6 +625,7 @@ pub enum TokenKind {
     SemiColon,
     Arrow,
     BackSlash,
+    Circumflex,
 
     Assign,
     Bang,
@@ -635,7 +637,7 @@ pub enum TokenKind {
     NotEq,
     Gt,
     Lt,
-    Mod,
+    Percent,
     Ampersand,
     Pipe,
     DoubleAmpersand,
