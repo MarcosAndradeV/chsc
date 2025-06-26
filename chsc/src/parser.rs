@@ -139,34 +139,31 @@ fn parse_stmt<'src>(
         TokenKind::Keyword if token.source == "var" => {
             lexer.next_token();
             let token = expect(lexer, TokenKind::Identifier, None::<&str>)?;
+            let id = VarId(curr_fn.vars.len(), false);
+            vars_index.insert_var_index(token.source, id);
+            curr_fn.vars.push(Var { token, ty: None });
+
             if inspect(lexer, &[TokenKind::Assign])? {
                 lexer.next_token();
                 let value = parse_expr(
                     lexer,
                     curr_fn,
                     vars_index,
+                    Some(id),
                     Precedence::Lowest,
                     &[TokenKind::SemiColon],
                 )?;
                 expect(lexer, TokenKind::SemiColon, None::<&str>)?;
-                let id = VarId(curr_fn.vars.len(), false);
-                vars_index.insert_var_index(token.source, id);
-                curr_fn.vars.push(Var { token, ty: None });
+
                 curr_fn.body.push(Stmt::Assign {
                     lhs: Expr::Var(token, id),
                     rhs: value,
                 });
-                return Ok(());
             } else {
-                let id = VarId(curr_fn.vars.len(), false);
-                vars_index.insert_var_index(token.source, id);
-                curr_fn.vars.push(Var { token, ty: None });
                 expect(lexer, TokenKind::SemiColon, None::<&str>)?;
-                return Ok(());
             }
-            let id = VarId(curr_fn.vars.len(), false);
-            vars_index.insert_var_index(token.source, id);
-            curr_fn.vars.push(Var { token, ty: None });
+
+            Ok(())
         }
         TokenKind::Keyword if token.source == "return" => {
             lexer.next_token();
@@ -178,6 +175,7 @@ fn parse_stmt<'src>(
                     lexer,
                     curr_fn,
                     vars_index,
+                    None,
                     Precedence::Lowest,
                     &[TokenKind::SemiColon],
                 )?;
@@ -194,6 +192,7 @@ fn parse_stmt<'src>(
                 lexer,
                 curr_fn,
                 vars_index,
+                None,
                 Precedence::Lowest,
                 &[TokenKind::CloseParen],
             )?;
@@ -230,6 +229,7 @@ fn parse_stmt<'src>(
                 lexer,
                 curr_fn,
                 vars_index,
+                None,
                 Precedence::Lowest,
                 &[TokenKind::CloseParen],
             )?;
@@ -270,6 +270,7 @@ fn parse_stmt<'src>(
                 lexer,
                 curr_fn,
                 vars_index,
+                None,
                 Precedence::Lowest,
                 &[TokenKind::Assign, TokenKind::SemiColon],
             )?;
@@ -284,6 +285,7 @@ fn parse_stmt<'src>(
                 lexer,
                 curr_fn,
                 vars_index,
+                None,
                 Precedence::Lowest,
                 &[TokenKind::SemiColon],
             )?;
@@ -299,6 +301,7 @@ fn parse_expr<'src>(
     lexer: &mut PeekableLexer<'src>,
     curr_fn: &mut Func<'src>,
     vars_index: &VarsIndex,
+    allocated_var: Option<VarId>,
     precedence: Precedence,
     stop: &[TokenKind],
 ) -> ParseResult<'src, Expr<'src>> {
@@ -324,10 +327,13 @@ fn parse_expr<'src>(
                 match ptoken.kind {
                     TokenKind::CloseParen => {
                         lexer.next_token();
-                        let id = VarId(curr_fn.vars.len(), false);
-                        curr_fn.vars.push(Var {
-                            token: left_token,
-                            ty: None,
+                        let id = allocated_var.unwrap_or_else(|| {
+                            let len = curr_fn.vars.len();
+                            curr_fn.vars.push(Var {
+                                token: left_token,
+                                ty: None,
+                            });
+                            VarId(len, false)
                         });
                         curr_fn.body.push(Stmt::Syscall {
                             result: Some(id),
@@ -344,6 +350,7 @@ fn parse_expr<'src>(
                             lexer,
                             curr_fn,
                             vars_index,
+                            None,
                             Precedence::Lowest,
                             &[TokenKind::Comma, TokenKind::CloseParen],
                         )?;
@@ -353,8 +360,15 @@ fn parse_expr<'src>(
             }
         }
         TokenKind::Bang => {
-            let operand = parse_expr(lexer, curr_fn, vars_index, curr_precedence, stop)?;
-            let id = VarId(curr_fn.vars.len(), false);
+            let id = allocated_var.unwrap_or_else(|| {
+                let len = curr_fn.vars.len();
+                curr_fn.vars.push(Var {
+                    token: left_token,
+                    ty: None,
+                });
+                VarId(len, false)
+            });
+            let operand = parse_expr(lexer, curr_fn, vars_index, Some(id), curr_precedence, stop)?;
             curr_fn.vars.push(Var {
                 token: left_token,
                 ty: None,
@@ -368,7 +382,14 @@ fn parse_expr<'src>(
             Expr::Var(left_token, id)
         }
         TokenKind::Ampersand => {
-            let operand = parse_expr(lexer, curr_fn, vars_index, curr_precedence, stop)?;
+            let operand = parse_expr(
+                lexer,
+                curr_fn,
+                vars_index,
+                allocated_var,
+                curr_precedence,
+                stop,
+            )?;
             curr_precedence = Precedence::RefDeref;
             match operand {
                 Expr::Var(token, var_id) => Expr::Ref(token, var_id),
@@ -381,6 +402,7 @@ fn parse_expr<'src>(
                 lexer,
                 curr_fn,
                 vars_index,
+                allocated_var,
                 precedence,
                 &[TokenKind::CloseParen],
             )?;
@@ -401,10 +423,13 @@ fn parse_expr<'src>(
                     match ptoken.kind {
                         TokenKind::CloseParen => {
                             lexer.next_token();
-                            let id = VarId(curr_fn.vars.len(), false);
-                            curr_fn.vars.push(Var {
-                                token: left_token,
-                                ty: None,
+                            let id = allocated_var.unwrap_or_else(|| {
+                                let len = curr_fn.vars.len();
+                                curr_fn.vars.push(Var {
+                                    token: left_token,
+                                    ty: None,
+                                });
+                                VarId(len, false)
                             });
                             curr_fn.body.push(Stmt::Funcall {
                                 result: Some(id),
@@ -422,6 +447,7 @@ fn parse_expr<'src>(
                                 lexer,
                                 curr_fn,
                                 vars_index,
+                                None,
                                 Precedence::Lowest,
                                 &[TokenKind::Comma, TokenKind::CloseParen],
                             )?;
@@ -433,10 +459,13 @@ fn parse_expr<'src>(
             }
             TokenKind::Caret => {
                 lexer.next_token();
-                let id = VarId(curr_fn.vars.len(), false);
-                curr_fn.vars.push(Var {
-                    token: left_token,
-                    ty: None,
+                let id = allocated_var.unwrap_or_else(|| {
+                    let len = curr_fn.vars.len();
+                    curr_fn.vars.push(Var {
+                        token: left_token,
+                        ty: None,
+                    });
+                    VarId(len, false)
                 });
                 curr_precedence = Precedence::RefDeref;
                 left = match left {
@@ -462,9 +491,15 @@ fn parse_expr<'src>(
         let token = lexer.next_token();
         curr_precedence = Precedence::from_token_kind(&token.kind);
         left = {
-            let right = parse_expr(lexer, curr_fn, vars_index, curr_precedence, stop)?;
-            let id = VarId(curr_fn.vars.len(), false);
-            curr_fn.vars.push(Var { token, ty: None });
+            let right = parse_expr(lexer, curr_fn, vars_index, None, curr_precedence, stop)?;
+            let id = allocated_var.unwrap_or_else(|| {
+                let len = curr_fn.vars.len();
+                curr_fn.vars.push(Var {
+                    token: left_token,
+                    ty: None,
+                });
+                VarId(len, false)
+            });
             curr_fn.body.push(Stmt::Binop {
                 result: id,
                 operator: token,

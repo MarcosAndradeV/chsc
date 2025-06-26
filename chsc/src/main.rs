@@ -1,9 +1,10 @@
 #![allow(unused)]
 
-
 use std::fs;
 
-use fasm_backend::{Cond, Instr, DataDef, DataDirective, DataExpr, Function, Module, Register, Value};
+use fasm_backend::{
+    Cond, DataDef, DataDirective, DataExpr, Function, Instr, Module, Register, Value,
+};
 
 use crate::ast::*;
 use crate::chslexer::*;
@@ -41,10 +42,13 @@ fn app() -> Result<(), AppError> {
     let mut program_ast =
         parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
 
-
     if debug_ast {
         // const_fold(&mut program_ast);
         print_program(&program_ast);
+        let useds = find_used_vars(&program_ast.funcs[0]);
+        for (i, used) in useds.iter().enumerate() {
+            println!("Var({i}) [{}]", if *used { 'x' } else { ' ' })
+        }
         return Ok(());
     }
 
@@ -98,7 +102,6 @@ fn generate(p: Program, use_c: bool) -> Result<Module, AppError> {
 }
 
 fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
-
     let Func {
         name,
         args,

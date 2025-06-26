@@ -77,14 +77,6 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
     }
 }
 
-pub struct UsedVars<'src>(pub Vec<(Var<'src>, bool)>);
-
-impl<'src> UsedVars<'src> {
-    pub fn new(vars: Vec<Var<'src>>, used: Vec<bool>) -> Self {
-        Self(vars.into_iter().zip(used).collect())
-    }
-}
-
 pub fn find_used_vars(af: &Func<'_>) -> Vec<bool> {
     let mut used = vec![false; af.vars.len()];
     fn mark_used(used: &mut Vec<bool>, expr: &Expr<'_>) {
