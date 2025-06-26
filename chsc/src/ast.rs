@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{chslexer::{Token, TokenKind}, parser::ParseResult};
+use crate::{
+    chslexer::{Token, TokenKind},
+    parser::ParseResult,
+};
 
 #[derive(Debug, Default)]
 pub struct Program<'src> {
@@ -127,11 +130,29 @@ pub enum Stmt<'src> {
 
 #[derive(Debug)]
 pub enum Expr<'src> {
-    IntLit(Token<'src>),
+    IntLit(Loc<'src>, u64),
     StrLit(Token<'src>),
     Var(Token<'src>, VarId),
     Deref(Token<'src>, VarId),
     Ref(Token<'src>, VarId),
+}
+
+impl<'src> std::fmt::Display for Expr<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::IntLit(_, lit) => write!(f, "{lit}"),
+            Expr::StrLit(token) => write!(f, "#str#"),
+            Expr::Var(token, VarId(id, g)) => {
+                if *g {
+                    write!(f, "{token}")
+                } else {
+                    write!(f, "Var({})", id)
+                }
+            }
+            Expr::Deref(token, var_id) => write!(f, "{token}^"),
+            Expr::Ref(token, var_id) => write!(f, "&{token}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -159,7 +180,7 @@ impl Precedence {
         use TokenKind::*;
 
         match kind {
-            Assign  => Self::Assignment,
+            Assign => Self::Assignment,
 
             DoublePipe => Self::LogicalOr,
             DoubleAmpersand => Self::LogicalAnd,
@@ -182,6 +203,117 @@ impl Precedence {
             Caret | Ampersand => Self::RefDeref,
 
             _ => Self::Lowest,
+        }
+    }
+}
+
+use crate::*;
+
+pub fn print_program(program: &Program) {
+    for ext in &program.externs {
+        match ext {
+            Extern::Symbol(tok) => {
+                println!("extern symbol: {}", tok);
+            }
+            Extern::Func(func) => {
+                println!("extern func:");
+                print_func(func);
+            }
+            Extern::Var(var) => {
+                println!("extern var: {}{:?}", var.token, var.ty);
+            }
+        }
+    }
+
+    for func in &program.funcs {
+        print_func(func);
+    }
+}
+
+fn print_func(func: &Func) {
+    print!("fn {}(", func.name.source);
+    for (i, (arg_name, arg_ty)) in func.args.iter().enumerate() {
+        print!("    {}: {:?}", arg_name, arg_ty);
+        if i < func.args.len() - 1 {
+            println!(",");
+        } else {
+            println!();
+        }
+    }
+    println!(") -> {:?} {{", func.ret_type);
+
+    for stmt in &func.body {
+        print_stmt(stmt);
+    }
+
+    println!("}}");
+}
+
+fn print_stmt(stmt: &Stmt) {
+    match stmt {
+        Stmt::Assign { lhs, rhs } => {
+            println!("    {} = {};", lhs, rhs);
+        }
+        Stmt::Return(expr) => match expr {
+            Some(e) => println!("    return {};", e),
+            None => println!("    return;"),
+        },
+        Stmt::Unop {
+            result,
+            operator,
+            operand,
+        } => {
+            println!("    Var({}) = {}{};", result.0, operator, operand);
+        }
+        Stmt::Binop {
+            result,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            println!("    Var({}) = {} {} {};", result.0, lhs, operator, rhs);
+        }
+        Stmt::Funcall {
+            result,
+            caller,
+            args,
+        } => {
+            if let Some(res) = result {
+                print!("    Var({}) = ", res.0);
+            } else {
+                print!("    ");
+            }
+            print!("{}(", caller);
+            for (i, arg) in args.iter().enumerate() {
+                print!("{}", arg);
+                if i < args.len() - 1 {
+                    print!(", ");
+                }
+            }
+            println!(");");
+        }
+        Stmt::Syscall { result, args } => {
+            if let Some(res) = result {
+                print!("    Var({}) = syscall(", res.0);
+            } else {
+                print!("    syscall(");
+            }
+            for (i, arg) in args.iter().enumerate() {
+                print!("{}", arg);
+                if i < args.len() - 1 {
+                    print!(", ");
+                }
+            }
+            println!(");");
+        }
+        Stmt::JZ(cond, block) => {
+            println!("    if !{} goto block_{};", cond, block);
+        }
+        Stmt::Jmp(block) => {
+            println!("    goto block_{};", block);
+        }
+        Stmt::Block(block) => {
+            println!("block_{}:", block);
         }
     }
 }

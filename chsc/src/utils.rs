@@ -218,7 +218,7 @@ impl From<BuildError> for AppError {
     }
 }
 
-pub fn parse_args() -> Result<(String, Vec<String>, bool, bool), AppError> {
+pub fn parse_args() -> Result<(String, Vec<String>, bool, bool, bool), AppError> {
     let mut args = args();
 
     args.next()
@@ -227,6 +227,7 @@ pub fn parse_args() -> Result<(String, Vec<String>, bool, bool), AppError> {
     let mut compiler_flags = vec!["-no-pie".to_string()];
     let mut run = false;
     let mut use_c = false;
+    let mut debug_ast = false;
     let mut file_path: Option<String> = None;
 
     while let Some(arg) = args.next() {
@@ -250,6 +251,9 @@ pub fn parse_args() -> Result<(String, Vec<String>, bool, bool), AppError> {
             }
             "--use-c" => {
                 use_c = true;
+            }
+            "--ast" => {
+                debug_ast = true;
             }
             "-h" | "--help" => {
                 println!("Usage: chsc [OPTIONS] <input>");
@@ -281,7 +285,7 @@ pub fn parse_args() -> Result<(String, Vec<String>, bool, bool), AppError> {
     let file_path = file_path
         .ok_or_else(|| AppError::ArgumentError("Usage: chsc [OPTIONS] <input>".to_string()))?;
 
-    Ok((file_path, compiler_flags, run, use_c))
+    Ok((file_path, compiler_flags, run, use_c, debug_ast))
 }
 
 pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
