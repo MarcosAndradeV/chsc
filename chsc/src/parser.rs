@@ -139,9 +139,6 @@ fn parse_stmt<'src>(
         TokenKind::Keyword if token.source == "var" => {
             lexer.next_token();
             let token = expect(lexer, TokenKind::Identifier, None::<&str>)?;
-            let id = VarId(curr_fn.vars.len(), false);
-            vars_index.insert_var_index(token.source, id);
-            curr_fn.vars.push(Var { token, ty: None });
             if inspect(lexer, &[TokenKind::Assign])? {
                 lexer.next_token();
                 let value = parse_expr(
@@ -152,15 +149,24 @@ fn parse_stmt<'src>(
                     &[TokenKind::SemiColon],
                 )?;
                 expect(lexer, TokenKind::SemiColon, None::<&str>)?;
+                let id = VarId(curr_fn.vars.len(), false);
+                vars_index.insert_var_index(token.source, id);
+                curr_fn.vars.push(Var { token, ty: None });
                 curr_fn.body.push(Stmt::Assign {
                     lhs: Expr::Var(token, id),
                     rhs: value,
                 });
                 return Ok(());
             } else {
+                let id = VarId(curr_fn.vars.len(), false);
+                vars_index.insert_var_index(token.source, id);
+                curr_fn.vars.push(Var { token, ty: None });
                 expect(lexer, TokenKind::SemiColon, None::<&str>)?;
                 return Ok(());
             }
+            let id = VarId(curr_fn.vars.len(), false);
+            vars_index.insert_var_index(token.source, id);
+            curr_fn.vars.push(Var { token, ty: None });
         }
         TokenKind::Keyword if token.source == "return" => {
             lexer.next_token();
@@ -299,7 +305,9 @@ fn parse_expr<'src>(
     let mut curr_precedence = Precedence::Lowest;
     let left_token = lexer.next_token();
     let mut left = match left_token.kind {
-        TokenKind::IntegerNumber => Expr::IntLit(left_token),
+        TokenKind::IntegerNumber => {
+            Expr::IntLit(left_token.loc, left_token.source.parse().unwrap())
+        }
         TokenKind::StringLiteral => Expr::StrLit(left_token),
         TokenKind::Identifier => {
             let Some(var_id) = vars_index.get_var_index(left_token.source) else {
@@ -367,6 +375,17 @@ fn parse_expr<'src>(
                 Expr::Deref(token, var_id) => Expr::Var(token, var_id),
                 _ => todo!(),
             }
+        }
+        TokenKind::OpenParen => {
+            let expr = parse_expr(
+                lexer,
+                curr_fn,
+                vars_index,
+                precedence,
+                &[TokenKind::CloseParen],
+            )?;
+            expect(lexer, TokenKind::CloseParen, Some("Expect `)`"))?;
+            expr
         }
         _ => todo!("{left_token}"),
     };
