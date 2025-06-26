@@ -42,13 +42,13 @@ fn app() -> Result<(), AppError> {
     let mut program_ast =
         parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
 
+    const_fold(&mut program_ast);
+    for func in &mut program_ast.funcs {
+        mark_used_variables(func);
+    }
+
     if debug_ast {
-        // const_fold(&mut program_ast);
         print_program(&program_ast);
-        let useds = find_used_vars(&program_ast.funcs[0]);
-        for (i, used) in useds.iter().enumerate() {
-            println!("Var({i}) [{}]", if *used { 'x' } else { ' ' })
-        }
         return Ok(());
     }
 
@@ -110,14 +110,15 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
         ..
     } = func;
     let mut f = Function::new(m.link_with_c, func.name.source);
-    f.allocate_stack(vars.len() * 8);
+    f.allocate_stack(get_used_vars_len(&vars) * 8);
+    let offsets = map_vars_to_offsets(&vars);
     f.push_block("start");
     assert!(args.is_empty());
     for stmt in body {
         match stmt {
             Stmt::Return(expr) => {
                 if let Some(expr) = expr {
-                    generate_expr(m, &mut f, &vars, expr, Value::Register(Register::Rax));
+                    generate_expr(m, &mut f, &offsets, expr, Value::Register(Register::Rax));
                 }
                 f.push_raw_instr("mov rsp, rbp");
                 f.push_raw_instr("pop rbp");
@@ -130,13 +131,16 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 );
                 let regs = Register::get_syscall_call_convention().into_iter();
                 for (expr, reg) in args.into_iter().zip(regs).rev() {
-                    generate_expr(m, &mut f, &vars, expr, Value::Register(reg));
+                    generate_expr(m, &mut f, &offsets, expr, Value::Register(reg));
                 }
 
-                f.push_raw_instr(format!("syscall"));
+                f.push_instr(Instr::Syscall);
 
-                if let Some(VarId(var_id, _)) = result {
-                    let offset = var_id * 8;
+                if let Some(var_id) = result {
+                    if !vars[var_id.0].used {
+                        continue;
+                    }
+                    let offset = offsets[var_id.0];
                     f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
                 }
             }
@@ -157,19 +161,20 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
 
                 let regs = Register::get_call_convention().into_iter();
                 for (expr, reg) in args.into_iter().zip(regs).rev() {
-                    generate_expr(m, &mut f, &vars, expr, Value::Register(reg));
+                    generate_expr(m, &mut f, &offsets, expr, Value::Register(reg));
                 }
 
                 // x86_64 Linux ABI passes the amount of floating point args via al.
                 f.push_raw_instr("mov al, 0");
                 match caller {
-                    Expr::Var(token, _) => {
+                    Expr::Global(token) => {
                         let name = token.source;
                         f.push_raw_instr(format!("call _{name}"));
                     }
                     Expr::IntLit(loc, ..)
                     | Expr::StrLit(Token { loc, .. })
                     | Expr::Deref(Token { loc, .. }, _)
+                    | Expr::Var(Token { loc, .. }, _)
                     | Expr::Ref(Token { loc, .. }, _) => {
                         return Err(AppError::GenerationError(
                             Some(format!(
@@ -181,8 +186,11 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                     }
                 }
 
-                if let Some(VarId(var_id, _)) = result {
-                    let offset = var_id * 8;
+                if let Some(var_id) = result {
+                    if !vars[var_id.0].used {
+                        continue;
+                    }
+                    let offset = offsets[var_id.0];
                     f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
                 }
             }
@@ -191,8 +199,11 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 operator,
                 operand,
             } => {
-                generate_expr(m, &mut f, &vars, operand, Value::Register(Register::Rax));
-                let offset = result.0 * 8;
+                if !vars[result.0].used {
+                    continue;
+                }
+                let offset = offsets[result.0];
+                generate_expr(m, &mut f, &offsets, operand, Value::Register(Register::Rax));
                 let mut out_reg = Register::Rax;
                 match operator.kind {
                     TokenKind::Bang => {
@@ -211,9 +222,12 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 lhs,
                 rhs,
             } => {
-                generate_expr(m, &mut f, &vars, lhs, Value::Register(Register::Rax));
-                generate_expr(m, &mut f, &vars, rhs, Value::Register(Register::Rbx));
-                let offset = result.0 * 8;
+                if !vars[result.0].used {
+                    continue;
+                }
+                let offset = offsets[result.0];
+                generate_expr(m, &mut f, &offsets, lhs, Value::Register(Register::Rax));
+                generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rbx));
                 let mut out_reg = Register::Rax;
                 match operator.kind {
                     TokenKind::Plus => f.push_raw_instr("add rax, rbx"),
@@ -254,27 +268,28 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {out_reg}"));
             }
             Stmt::Assign { lhs, rhs } => match lhs {
-                Expr::Var(token, VarId(var_id, is_extern)) => {
-                    generate_expr(m, &mut f, &vars, rhs, Value::Register(Register::Rax));
-                    if is_extern {
-                        let name = token.source;
-                        f.push_raw_instr(format!("mov QWORD [_{name}], rax"));
-                    } else {
-                        let offset = var_id * 8;
-                        f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
+                Expr::Var(token, var_id) => {
+                    if !vars[var_id.0].used {
+                        continue;
                     }
+                    generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rax));
+
+                    let offset = offsets[var_id.0];
+                    f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
                 }
-                Expr::Deref(token, VarId(var_id, is_extern)) => {
-                    generate_expr(m, &mut f, &vars, rhs, Value::Register(Register::Rbx));
-                    if is_extern {
-                        let name = token.source;
-                        f.push_raw_instr(format!("mov QWORD rax, [_{name}]"));
-                        f.push_raw_instr(format!("mov QWORD [rax], rbx"));
-                    } else {
-                        let offset = var_id * 8;
-                        f.push_raw_instr(format!("mov QWORD rax, [rbp-{offset}]"));
-                        f.push_raw_instr(format!("mov QWORD [rax], rbx"));
-                    }
+                Expr::Global(token) => {
+                    let name = token.source;
+                    f.push_raw_instr(format!("mov QWORD [_{name}], rax"));
+                }
+                Expr::Deref(token, var_id) => {
+                    generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rbx));
+                    let offset = offsets[var_id.0];
+                    f.push_raw_instr(format!("mov QWORD rax, [rbp-{offset}]"));
+                    f.push_raw_instr(format!("mov QWORD [rax], rbx"));
+
+                    // let name = token.source;
+                    // f.push_raw_instr(format!("mov QWORD rax, [_{name}]"));
+                    // f.push_raw_instr(format!("mov QWORD [rax], rbx"));
                 }
                 _ => todo!("{lhs:?}"),
             },
@@ -282,7 +297,7 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 f.push_block(format!("b{id}"));
             }
             Stmt::JZ(cond, id) => {
-                generate_expr(m, &mut f, &vars, cond, Value::Register(Register::Rax));
+                generate_expr(m, &mut f, &offsets, cond, Value::Register(Register::Rax));
                 f.push_raw_instr("test rax, rax");
                 f.push_raw_instr(format!("jz .b{id}"));
             }
@@ -296,10 +311,10 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
     Ok(())
 }
 
-fn generate_expr<'src>(
+fn generate_expr(
     m: &mut Module,
     f: &mut Function,
-    vars: &Vec<Var<'src>>,
+    offsets: &Vec<usize>,
     expr: Expr,
     val: Value,
 ) {
@@ -317,34 +332,29 @@ fn generate_expr<'src>(
         Expr::IntLit(_, lit) => {
             f.push_raw_instr(format!("mov {val}, {lit}"));
         }
-        Expr::Var(token, VarId(var_id, is_extern)) => {
-            if is_extern {
-                let name = token.source;
-                f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
-            } else {
-                let offset = var_id * 8;
-                f.push_raw_instr(format!("mov {val}, QWORD [rbp-{offset}]"));
-            }
+        Expr::Var(token, var_id) => {
+            let offset = offsets[var_id.0];
+            f.push_raw_instr(format!("mov {val}, QWORD [rbp-{offset}]"));
         }
-        Expr::Deref(token, VarId(var_id, is_extern)) => {
-            if is_extern {
-                let name = token.source;
-                f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
-                f.push_raw_instr(format!("mov {val}, [{val}]"));
-            } else {
-                let offset = var_id * 8;
-                f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
-                f.push_raw_instr(format!("mov {val}, [{val}]"));
-            }
+        Expr::Global(token) => {
+            let name = token.source;
+            f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
         }
-        Expr::Ref(token, VarId(var_id, is_extern)) => {
-            if is_extern {
-                let name = token.source;
-                f.push_raw_instr(format!("lea {val}, QWORD _{name}"));
-            } else {
-                let offset = var_id * 8;
-                f.push_raw_instr(format!("lea {val}, [rbp-{offset}]"));
-            }
+        Expr::Deref(token, var_id) => {
+            // let name = token.source;
+            // f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
+            // f.push_raw_instr(format!("mov {val}, [{val}]"));
+
+            let offset = offsets[var_id.0];
+            f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
+            f.push_raw_instr(format!("mov {val}, [{val}]"));
+        }
+        Expr::Ref(token, var_id) => {
+            // let name = token.source;
+            // f.push_raw_instr(format!("lea {val}, QWORD _{name}"));
+
+            let offset = offsets[var_id.0];
+            f.push_raw_instr(format!("lea {val}, [rbp-{offset}]"));
         }
     }
 }
