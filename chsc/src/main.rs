@@ -1,21 +1,20 @@
 #![allow(unused)]
 
-use std::collections::HashSet;
 
-use std::env::consts::OS;
-use std::{collections::HashMap, env::args, fs, path::PathBuf};
+use std::fs;
 
-use fasm_backend::{Cond, Instr};
+use fasm_backend::{Cond, Instr, DataDef, DataDirective, DataExpr, Function, Module, Register, Value};
 
 use crate::ast::*;
 use crate::chslexer::*;
 
-use crate::fasm_backend::{DataDef, DataDirective, DataExpr, Function, Module, Register, Value};
+use crate::opt::*;
 use crate::utils::*;
 
 mod ast;
 mod chslexer;
 mod fasm_backend;
+mod opt;
 mod parser;
 mod utils;
 
@@ -30,7 +29,7 @@ fn main() {
 
 /// I HATE RUST
 fn app() -> Result<(), AppError> {
-    let (file_path, compiler_flags, run, use_c) = parse_args()?;
+    let (file_path, compiler_flags, run, use_c, debug_ast) = parse_args()?;
 
     validate_input_file(&file_path)?;
 
@@ -39,8 +38,15 @@ fn app() -> Result<(), AppError> {
         error: e,
     })?;
 
-    let program_ast =
+    let mut program_ast =
         parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
+
+
+    if debug_ast {
+        // const_fold(&mut program_ast);
+        print_program(&program_ast);
+        return Ok(());
+    }
 
     let asm_code = generate(program_ast, use_c)?;
 
@@ -79,8 +85,8 @@ fn generate(p: Program, use_c: bool) -> Result<Module, AppError> {
             Extern::Symbol(token) => {
                 m.push_extrn(token.source);
             }
-            Extern::Func(func) => todo!(),
-            Extern::Var(var) => todo!(),
+            Extern::Func(_) => todo!(),
+            Extern::Var(_) => todo!(),
         }
     }
 
@@ -92,6 +98,7 @@ fn generate(p: Program, use_c: bool) -> Result<Module, AppError> {
 }
 
 fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
+
     let Func {
         name,
         args,
@@ -153,20 +160,20 @@ fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
                 // x86_64 Linux ABI passes the amount of floating point args via al.
                 f.push_raw_instr("mov al, 0");
                 match caller {
-                    Expr::Var(token, VarId(var_id, _)) => {
+                    Expr::Var(token, _) => {
                         let name = token.source;
                         f.push_raw_instr(format!("call _{name}"));
                     }
-                    Expr::IntLit(token)
-                    | Expr::StrLit(token)
-                    | Expr::Deref(token, _)
-                    | Expr::Ref(token, _) => {
+                    Expr::IntLit(loc, ..)
+                    | Expr::StrLit(Token { loc, .. })
+                    | Expr::Deref(Token { loc, .. }, _)
+                    | Expr::Ref(Token { loc, .. }, _) => {
                         return Err(AppError::GenerationError(
                             Some(format!(
                                 "{}: call arbitrary expressions is not supported yet",
-                                token.loc
+                                loc
                             )),
-                            format!("{}: Cannot call arbitrary expressions", token.loc),
+                            format!("{}: Cannot call arbitrary expressions", loc),
                         ));
                     }
                 }
@@ -304,8 +311,8 @@ fn generate_expr<'src>(
             ));
             f.push_raw_instr(format!("mov {val}, {name}"));
         }
-        Expr::IntLit(token) => {
-            f.push_raw_instr(format!("mov {val}, {token}"));
+        Expr::IntLit(_, lit) => {
+            f.push_raw_instr(format!("mov {val}, {lit}"));
         }
         Expr::Var(token, VarId(var_id, is_extern)) => {
             if is_extern {
