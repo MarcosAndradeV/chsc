@@ -11,9 +11,15 @@ pub struct Program<'src> {
     pub funcs: Vec<Func<'src>>,
 }
 
+#[derive(Debug)]
+pub enum Names {
+    Var(VarId),
+    Extern,
+}
+
 #[derive(Debug, Default)]
-pub struct VarsIndex<'src>(pub Vec<HashMap<&'src str, VarId>>);
-impl<'src> VarsIndex<'src> {
+pub struct NameSpace<'src>(pub Vec<HashMap<&'src str, Names>>);
+impl<'src> NameSpace<'src> {
     pub fn push_scope(&mut self) {
         self.0.push(HashMap::new());
     }
@@ -23,11 +29,11 @@ impl<'src> VarsIndex<'src> {
         self.0.pop();
     }
 
-    pub fn insert_var_index(&mut self, k: &'src str, v: VarId) -> Option<VarId> {
+    pub fn insert_var_index(&mut self, k: &'src str, v: Names) -> Option<Names> {
         self.0.last_mut().and_then(|scope| scope.insert(k, v))
     }
 
-    pub fn get_var_index(&self, k: &'src str) -> Option<&VarId> {
+    pub fn get_var_index(&self, k: &'src str) -> Option<&Names> {
         for scope in self.0.iter().rev() {
             let v = scope.get(k);
             if v.is_some() {
@@ -46,17 +52,8 @@ impl std::fmt::Display for BlockId {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VarId(pub usize, pub bool);
-impl VarId {
-    pub fn fetch<'src>(&self, exprs: &'src [Var<'src>]) -> Option<&Var<'src>> {
-        exprs.get(self.0)
-    }
-
-    pub fn unwrap_fetch<'f, 'src>(&self, exprs: &'f [Var<'src>]) -> &'f Var<'src> {
-        exprs.get(self.0).unwrap()
-    }
-}
+#[derive(Debug, Default, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VarId(pub usize);
 
 #[derive(Debug)]
 pub enum Extern<'src> {
@@ -78,6 +75,17 @@ impl<'src> Extern<'src> {
 pub struct Var<'src> {
     pub token: Token<'src>,
     pub ty: Option<Type<'src>>,
+    pub used: bool,
+}
+
+impl<'src> Var<'src> {
+    pub fn new(token: Token<'src>) -> Self {
+        Self {
+            token,
+            ty: None,
+            used: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -133,22 +141,34 @@ pub enum Expr<'src> {
     IntLit(Loc<'src>, u64),
     StrLit(Token<'src>),
     Var(Token<'src>, VarId),
+
+    Global(Token<'src>),
+
     Deref(Token<'src>, VarId),
     Ref(Token<'src>, VarId),
+}
+
+impl<'src> PartialEq for Expr<'src> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::IntLit(_, l1), Self::IntLit(_, r1)) => l1 == r1,
+            (Self::StrLit(l0), Self::StrLit(r0)) => l0.source == r0.source,
+            (Self::Var(_, l1), Self::Var(_, r1)) => l1 == r1,
+            (Self::Global(l0), Self::Global(r0)) => l0.source == r0.source,
+            (Self::Deref(_, l1), Self::Deref(_, r1)) => l1 == r1,
+            (Self::Ref(_, l1), Self::Ref(_, r1)) => l1 == r1,
+            _ => false,
+        }
+    }
 }
 
 impl<'src> std::fmt::Display for Expr<'src> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::IntLit(_, lit) => write!(f, "{lit}"),
-            Expr::StrLit(token) => write!(f, "#str#"),
-            Expr::Var(token, VarId(id, g)) => {
-                if *g {
-                    write!(f, "{token}")
-                } else {
-                    write!(f, "Var({})", id)
-                }
-            }
+            Expr::StrLit(_) => write!(f, "@str"),
+            Expr::Var(token, VarId(id)) => write!(f, "Var({})", id),
+            Expr::Global(token) => write!(f, "{token}"),
             Expr::Deref(token, var_id) => write!(f, "{token}^"),
             Expr::Ref(token, var_id) => write!(f, "&{token}"),
         }
@@ -243,16 +263,24 @@ fn print_func(func: &Func) {
     println!(") -> {:?} {{", func.ret_type);
 
     for stmt in &func.body {
-        print_stmt(stmt);
+        print_stmt(&func.vars, stmt);
     }
 
     println!("}}");
 }
 
-fn print_stmt(stmt: &Stmt) {
+fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
     match stmt {
         Stmt::Assign { lhs, rhs } => {
-            println!("    {} = {};", lhs, rhs);
+            if let Expr::Var(_, var_id) = lhs {
+                if vars[var_id.0].used {
+                    println!("   [x] {} = {};", lhs, rhs);
+                } else {
+                    println!("   [ ] {} = {};", lhs, rhs);
+                }
+            } else {
+                println!("    {} = {};", lhs, rhs);
+            }
         }
         Stmt::Return(expr) => match expr {
             Some(e) => println!("    return {};", e),
@@ -263,7 +291,13 @@ fn print_stmt(stmt: &Stmt) {
             operator,
             operand,
         } => {
-            println!("    Var({}) = {}{};", result.0, operator, operand);
+            println!(
+                "   [{}] Var({}) = {}{};",
+                if vars[result.0].used { 'x' } else { ' ' },
+                result.0,
+                operator,
+                operand
+            );
         }
         Stmt::Binop {
             result,
@@ -271,7 +305,14 @@ fn print_stmt(stmt: &Stmt) {
             lhs,
             rhs,
         } => {
-            println!("    Var({}) = {} {} {};", result.0, lhs, operator, rhs);
+            println!(
+                "   [{}] Var({}) = {} {} {};",
+                if vars[result.0].used { 'x' } else { ' ' },
+                result.0,
+                lhs,
+                operator,
+                rhs
+            );
         }
         Stmt::Funcall {
             result,
@@ -279,7 +320,11 @@ fn print_stmt(stmt: &Stmt) {
             args,
         } => {
             if let Some(res) = result {
-                print!("    Var({}) = ", res.0);
+                print!(
+                    "   [{}] Var({}) = ",
+                    if vars[res.0].used { 'x' } else { ' ' },
+                    res.0
+                );
             } else {
                 print!("    ");
             }
@@ -294,9 +339,13 @@ fn print_stmt(stmt: &Stmt) {
         }
         Stmt::Syscall { result, args } => {
             if let Some(res) = result {
-                print!("    Var({}) = syscall(", res.0);
+                print!(
+                    "   [{}] Var({}) = ",
+                    if vars[res.0].used { 'x' } else { ' ' },
+                    res.0
+                );
             } else {
-                print!("    syscall(");
+                print!("    ");
             }
             for (i, arg) in args.iter().enumerate() {
                 print!("{}", arg);

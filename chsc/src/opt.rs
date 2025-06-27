@@ -1,13 +1,23 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+
 use crate::ast::*;
 use crate::chslexer::*;
+use crate::fasm_backend::Addr;
 use crate::fasm_backend::Function;
+use crate::fasm_backend::Register;
+use crate::fasm_backend::SizeOperator;
 use crate::fasm_backend::Value;
 
 pub fn const_fold(program_ast: &mut Program<'_>) {
-    fn try_to_comptime(comptime_vars: &[Option<u64>], expr: &Expr<'_>) -> Option<u64> {
+    fn try_into_const(comptime_vars: &mut [Option<u64>], expr: &Expr<'_>) -> Option<u64> {
         match expr {
             Expr::IntLit(_, lit) => Some(*lit),
-            Expr::Var(_, VarId(id, false)) => comptime_vars[*id],
+            Expr::Var(_, VarId(id)) => comptime_vars[*id],
+            Expr::Ref(_, VarId(id)) | Expr::Deref(_, VarId(id)) => {
+                comptime_vars[*id] = None;
+                None
+            },
             _ => None,
         }
     }
@@ -25,8 +35,8 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                     lhs,
                     rhs,
                 } => {
-                    let lhs = try_to_comptime(&comptime_vars, lhs);
-                    let rhs = try_to_comptime(&comptime_vars, rhs);
+                    let lhs = try_into_const(&mut comptime_vars, lhs);
+                    let rhs = try_into_const(&mut comptime_vars, rhs);
                     match (lhs, rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let val = match operator.kind {
@@ -45,12 +55,11 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                     }
                 }
                 Stmt::Assign {
-                    lhs: Expr::Var(token, VarId(id, false)),
+                    lhs: Expr::Var(token, var_id),
                     rhs,
                 } => {
-                    try_to_comptime(&comptime_vars, rhs);
-                    if let Some(val) = try_to_comptime(&comptime_vars, rhs) {
-                        comptime_vars[*id] = Some(val);
+                    if let Some(val) = try_into_const(&mut comptime_vars, rhs) {
+                        comptime_vars[var_id.0] = Some(val);
                         *rhs = Expr::IntLit(token.loc, val);
                     }
                 }
@@ -61,9 +70,9 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                 } => {
                     for arg in args {
                         match arg {
-                            Expr::Var(token, VarId(id, false)) => {
+                            Expr::Var(token, var_id) => {
                                 let loc = token.loc;
-                                if let Some(lit) = try_to_comptime(&comptime_vars, arg) {
+                                if let Some(lit) = try_into_const(&mut comptime_vars, arg) {
                                     *arg = Expr::IntLit(loc, lit);
                                 }
                             }
@@ -77,47 +86,54 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
     }
 }
 
-pub struct UsedVars<'src>(pub Vec<(Var<'src>, bool)>);
-
-impl<'src> UsedVars<'src> {
-    pub fn new(vars: Vec<Var<'src>>, used: Vec<bool>) -> Self {
-        Self(vars.into_iter().zip(used).collect())
-    }
-}
-
-pub fn find_used_vars(af: &Func<'_>) -> Vec<bool> {
-    let mut used = vec![false; af.vars.len()];
-    fn mark_used(used: &mut Vec<bool>, expr: &Expr<'_>) {
-        if let Expr::Var(_, VarId(id, false)) = expr {
-            used[*id] = true;
+pub fn mark_used_variables(af: &mut Func<'_>) {
+    fn mark_used(vars: &mut Vec<Var<'_>>, expr: &mut Expr<'_>) {
+        if let Expr::Var(_, var_id) = expr {
+            vars[var_id.0].used = true;
         }
     }
-    for stmt in &af.body {
+
+    for stmt in &mut af.body {
         match stmt {
             Stmt::Return(Some(expr)) => {
-                mark_used(&mut used, expr);
+                mark_used(&mut af.vars, expr);
             }
             Stmt::Unop { operand, .. } => {
-                mark_used(&mut used, operand);
+                mark_used(&mut af.vars, operand);
             }
             Stmt::Binop { lhs, rhs, .. } => {
-                mark_used(&mut used, lhs);
-                mark_used(&mut used, rhs);
+                mark_used(&mut af.vars, lhs);
+                mark_used(&mut af.vars, rhs);
             }
             Stmt::JZ(expr, ..) => {
-                mark_used(&mut used, expr);
+                mark_used(&mut af.vars, expr);
             }
             Stmt::Assign { rhs, .. } => {
-                mark_used(&mut used, rhs);
+                mark_used(&mut af.vars, rhs);
             }
             Stmt::Funcall { args, .. } | Stmt::Syscall { args, .. } => {
                 for arg in args {
-                    mark_used(&mut used, arg);
+                    mark_used(&mut af.vars, arg);
                 }
             }
             _ => (),
         }
     }
+}
 
-    return used;
+pub fn map_vars_to_offsets(vars: &[Var<'_>]) -> Vec<usize> {
+    let mut offsets = vec![0; vars.len()];
+    let mut offset = 0usize;
+    for (i, var) in vars.iter().enumerate() {
+        if var.used {
+            offsets[i] = offset;
+            offset += 8;
+        }
+    }
+    offsets
+}
+
+pub fn get_used_vars_len(vars: &[Var<'_>]) -> usize {
+    vars.iter()
+        .fold(0, |acc, elem| if elem.used { acc + 1 } else { acc })
 }
