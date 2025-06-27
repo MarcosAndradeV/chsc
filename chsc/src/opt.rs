@@ -10,10 +10,14 @@ use crate::fasm_backend::SizeOperator;
 use crate::fasm_backend::Value;
 
 pub fn const_fold(program_ast: &mut Program<'_>) {
-    fn try_into_const(comptime_vars: &[Option<u64>], expr: &Expr<'_>) -> Option<u64> {
+    fn try_into_const(comptime_vars: &mut [Option<u64>], expr: &Expr<'_>) -> Option<u64> {
         match expr {
             Expr::IntLit(_, lit) => Some(*lit),
             Expr::Var(_, VarId(id)) => comptime_vars[*id],
+            Expr::Ref(_, VarId(id)) | Expr::Deref(_, VarId(id)) => {
+                comptime_vars[*id] = None;
+                None
+            },
             _ => None,
         }
     }
@@ -31,8 +35,8 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                     lhs,
                     rhs,
                 } => {
-                    let lhs = try_into_const(&comptime_vars, lhs);
-                    let rhs = try_into_const(&comptime_vars, rhs);
+                    let lhs = try_into_const(&mut comptime_vars, lhs);
+                    let rhs = try_into_const(&mut comptime_vars, rhs);
                     match (lhs, rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let val = match operator.kind {
@@ -54,7 +58,7 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                     lhs: Expr::Var(token, var_id),
                     rhs,
                 } => {
-                    if let Some(val) = try_into_const(&comptime_vars, rhs) {
+                    if let Some(val) = try_into_const(&mut comptime_vars, rhs) {
                         comptime_vars[var_id.0] = Some(val);
                         *rhs = Expr::IntLit(token.loc, val);
                     }
@@ -68,7 +72,7 @@ pub fn const_fold(program_ast: &mut Program<'_>) {
                         match arg {
                             Expr::Var(token, var_id) => {
                                 let loc = token.loc;
-                                if let Some(lit) = try_into_const(&comptime_vars, arg) {
+                                if let Some(lit) = try_into_const(&mut comptime_vars, arg) {
                                     *arg = Expr::IntLit(loc, lit);
                                 }
                             }
