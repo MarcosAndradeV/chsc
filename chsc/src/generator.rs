@@ -5,7 +5,6 @@ use crate::{
         Cond, DataDef, DataDirective, DataExpr, Function, Instr, Module, Register, SizeOperator,
         Value,
     },
-    opt::map_vars_to_offsets,
     utils::AppError,
 };
 
@@ -30,23 +29,25 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
 }
 
 fn generate_func(func: Func<'_>, f: &mut Function, m: &mut Module) -> Result<(), AppError> {
-
-    let offsets = map_vars_to_offsets(&func.vars);
-    f.allocate_stack(offsets.len() * 8);
+    let (size, offsets) = calculate_stack_offsets(&func.vars);
+    f.allocate_stack(size);
     f.push_block("b");
 
     let call_convention = Register::get_call_convention();
     if func.args.len() >= call_convention.len() {
         return Err(AppError::GenerationError(
-            Some(
-                "Functions with more than 6 arguments are not supported yet."
-                    .to_string(),
-            ),
+            Some("Functions with more than 6 arguments are not supported yet.".to_string()),
             "Args via stack are not implemented yet".to_string(),
         ));
     }
 
-    for (id, reg) in func.args.iter().enumerate().map(|arg| arg.0).zip(call_convention) {
+    for (id, reg) in func
+        .args
+        .iter()
+        .enumerate()
+        .map(|arg| arg.0)
+        .zip(call_convention)
+    {
         let offset = offsets[id];
         f.push_raw_instr(format!("mov [rbp-{offset}], {reg}"));
     }
@@ -138,7 +139,11 @@ fn generate_func(func: Func<'_>, f: &mut Function, m: &mut Module) -> Result<(),
                 let offset = offsets[result.0];
                 f.push_raw_instr(format!("mov [rbp-{offset}], {l}"));
             }
-            Stmt::Funcall { result, caller, args  } => {
+            Stmt::Funcall {
+                result,
+                caller,
+                args,
+            } => {
                 let call_convention = Register::get_call_convention();
                 if args.len() >= call_convention.len() {
                     return Err(AppError::GenerationError(
@@ -249,6 +254,15 @@ fn generate_expr(
                 _ => todo!(),
             }
         }
+        Expr::Global(token) => {
+            f.push_raw_instr(format!(";; Global@{loc}", loc = token.loc));
+            match dst {
+                UinitValue(Some(val)) if val.is_register() => {
+                    f.push_raw_instr(format!("mov {val}, [_{token}]"));
+                }
+                _ => todo!(),
+            }
+        }
         _ => todo!("Expression: {expr}"),
     }
     Ok(())
@@ -274,4 +288,14 @@ impl std::fmt::Display for UinitValue {
             write!(f, ";; Uinit-value")
         }
     }
+}
+
+fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
+    let mut offsets = vec![0; vars.len()];
+    let mut offset = 8usize;
+    for (i, var) in vars.iter().enumerate() {
+        offsets[i] = offset;
+        offset += 8;
+    }
+    (vars.len() * 8, offsets)
 }

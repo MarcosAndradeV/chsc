@@ -40,8 +40,8 @@ pub fn parse<'src>(
         )
     });
     let mut p = Program::default();
-    let mut vars_index = NameSpace::default();
-    vars_index.push_scope();
+    let mut names_index = NameSpace::default();
+    names_index.push_scope();
 
     loop {
         let token = lexer.next_token();
@@ -50,14 +50,13 @@ pub fn parse<'src>(
         }
         match token.kind {
             TokenKind::Keyword if token.source == "fn" => {
-                let fn_ = parse_fn(&mut lexer, &mut vars_index)?;
+                let fn_ = parse_fn(&mut lexer, &mut names_index)?;
                 p.funcs.push(fn_);
             }
             TokenKind::Keyword if token.source == "extern" => {
-                let extern_ = parse_extern(&mut lexer, &mut vars_index)?;
-                let id = Names::Extern;
-                vars_index.insert_var_index(extern_.name(), id);
-                p.externs.push(extern_);
+                let r#extern = parse_extern(&mut lexer, &mut names_index)?;
+                names_index.insert_var_index(r#extern.name(), Names::Global);
+                p.externs.push(r#extern);
             }
             _ => todo!("{token}"),
         }
@@ -87,11 +86,11 @@ fn parse_extern<'src>(
 
 fn parse_fn<'src>(
     lexer: &mut PeekableLexer<'src>,
-    vars_index: &mut NameSpace<'src>,
+    names_index: &mut NameSpace<'src>,
 ) -> ParseResult<'src, Func<'src>> {
     let name = expect(lexer, TokenKind::Identifier, None::<&str>)?;
-    vars_index.insert_var_index(name.source, Names::Func);
-    vars_index.push_scope();
+    names_index.insert_var_index(name.source, Names::Global);
+    names_index.push_scope();
     let mut func = Func {
         name,
         ..Default::default()
@@ -112,7 +111,7 @@ fn parse_fn<'src>(
                 let token = lexer.next_token();
 
                 let id = VarId(func.vars.len());
-                vars_index.insert_var_index(token.source, Names::Var(id));
+                names_index.insert_var_index(token.source, Names::Var(id));
                 func.vars.push(Var::new(token));
 
                 func.args.push((token, Type::Name(token)));
@@ -134,11 +133,11 @@ fn parse_fn<'src>(
                 break;
             }
             _ => {
-                parse_stmt(lexer, &mut func, vars_index)?;
+                parse_stmt(lexer, &mut func, names_index)?;
             }
         }
     }
-    vars_index.pop_scope();
+    names_index.pop_scope();
 
     Ok(func)
 }
@@ -396,9 +395,8 @@ fn parse_expr<'src>(
             curr_precedence = Precedence::Highest;
             match names_index.get_var_index(left_token.source) {
                 Some(Names::Var(id)) => Expr::Var(left_token, *id),
-                Some(Names::Extern) => Expr::Global(left_token),
-                Some(Names::Func) => Expr::Global(left_token),
-                _ => todo!(),
+                Some(Names::Global) => Expr::Global(left_token),
+                _ => undefined(left_token)?,
             }
         }
         TokenKind::Ampersand => {
@@ -523,6 +521,13 @@ fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T
         msg.map(|m| m.to_string()),
     ))
 }
+
+fn undefined<T>(token: Token<'_>) -> Result<T, ParserError<'_>> {
+    Err(ParserError::Undefined(
+        token,
+    ))
+}
+
 
 fn inspect<'src>(
     lexer: &mut PeekableLexer<'src>,

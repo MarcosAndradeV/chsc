@@ -103,20 +103,3 @@ pub fn mark_used_variables(af: &mut Func<'_>) {
         }
     }
 }
-
-pub fn map_vars_to_offsets(vars: &[Var<'_>]) -> Vec<usize> {
-    let mut offsets = vec![0; vars.len()];
-    let mut offset = 8usize;
-    for (i, var) in vars.iter().enumerate() {
-        // if var.used {
-            offsets[i] = offset;
-            offset += 8;
-        // }
-    }
-    offsets
-}
-
-pub fn get_used_vars_len(vars: &[Var<'_>]) -> usize {
-    vars.len()
-    // .iter().fold(0, |acc, elem| if elem.used { acc + 1 } else { acc })
-}

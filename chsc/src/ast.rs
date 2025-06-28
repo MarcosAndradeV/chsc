@@ -13,9 +13,8 @@ pub struct Program<'src> {
 
 #[derive(Debug)]
 pub enum Names {
+    Global,
     Var(VarId),
-    Func,
-    Extern,
 }
 
 #[derive(Debug, Default)]
