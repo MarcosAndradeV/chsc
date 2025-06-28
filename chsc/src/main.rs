@@ -9,6 +9,7 @@ use fasm_backend::{
 use crate::ast::*;
 use crate::chslexer::*;
 
+use crate::generator::generate;
 use crate::opt::*;
 use crate::utils::*;
 
@@ -18,6 +19,7 @@ mod fasm_backend;
 mod opt;
 mod parser;
 mod utils;
+mod generator;
 
 fn main() {
     match app() {
@@ -42,10 +44,10 @@ fn app() -> Result<(), AppError> {
     let mut program_ast =
         parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
 
-    const_fold(&mut program_ast);
-    for func in &mut program_ast.funcs {
-        mark_used_variables(func);
-    }
+    // const_fold(&mut program_ast);
+    // for func in &mut program_ast.funcs {
+    //     mark_used_variables(func);
+    // }
 
     if debug_ast {
         print_program(&program_ast);
@@ -79,282 +81,4 @@ fn app() -> Result<(), AppError> {
     }
 
     Ok(())
-}
-
-fn generate(p: Program, use_c: bool) -> Result<Module, AppError> {
-    let mut m = Module::new(use_c);
-
-    for extern_ in p.externs {
-        match extern_ {
-            Extern::Symbol(token) => {
-                m.push_extrn(token.source);
-            }
-            Extern::Func(_) => todo!(),
-            Extern::Var(_) => todo!(),
-        }
-    }
-
-    for func in p.funcs {
-        generate_func(func, &mut m)?
-    }
-
-    Ok(m)
-}
-
-fn generate_func(func: Func, m: &mut Module) -> Result<(), AppError> {
-    let Func {
-        name,
-        args,
-        vars,
-        body,
-        ..
-    } = func;
-    let mut f = Function::new(m.link_with_c, func.name.source);
-    f.allocate_stack(get_used_vars_len(&vars) * 8);
-    let offsets = map_vars_to_offsets(&vars);
-    f.push_block("start");
-    assert!(args.is_empty());
-    for stmt in body {
-        match stmt {
-            Stmt::Return(expr) => {
-                if let Some(expr) = expr {
-                    generate_expr(m, &mut f, &offsets, expr, Value::Register(Register::Rax));
-                }
-                f.push_raw_instr("mov rsp, rbp");
-                f.push_raw_instr("pop rbp");
-                f.push_raw_instr("ret");
-            }
-            Stmt::Syscall { result, args } => {
-                assert!(
-                    args.len() < Register::get_syscall_call_convention().len(),
-                    "Implement args via stack"
-                );
-                let regs = Register::get_syscall_call_convention().into_iter();
-                for (expr, reg) in args.into_iter().zip(regs).rev() {
-                    generate_expr(m, &mut f, &offsets, expr, Value::Register(reg));
-                }
-
-                f.push_instr(Instr::Syscall);
-
-                if let Some(var_id) = result {
-                    if !vars[var_id.0].used {
-                        continue;
-                    }
-                    let offset = offsets[var_id.0];
-                    f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
-                }
-            }
-            Stmt::Funcall {
-                result,
-                caller,
-                args,
-            } => {
-                if args.len() >= Register::get_call_convention().len() {
-                    return Err(AppError::GenerationError(
-                        Some(
-                            "Functions with more than 6 arguments are not supported yet."
-                                .to_string(),
-                        ),
-                        "Implement args via stack".to_string(),
-                    ));
-                }
-
-                let regs = Register::get_call_convention().into_iter();
-                for (expr, reg) in args.into_iter().zip(regs).rev() {
-                    generate_expr(m, &mut f, &offsets, expr, Value::Register(reg));
-                }
-
-                // x86_64 Linux ABI passes the amount of floating point args via al.
-                f.push_raw_instr("mov al, 0");
-                match caller {
-                    Expr::Global(token) => {
-                        let name = token.source;
-                        f.push_raw_instr(format!("call _{name}"));
-                    }
-                    Expr::IntLit(loc, ..)
-                    | Expr::StrLit(Token { loc, .. })
-                    | Expr::Deref(Token { loc, .. }, _)
-                    | Expr::Var(Token { loc, .. }, _)
-                    | Expr::Ref(Token { loc, .. }, _) => {
-                        return Err(AppError::GenerationError(
-                            Some(format!(
-                                "{}: call arbitrary expressions is not supported yet",
-                                loc
-                            )),
-                            format!("{}: Cannot call arbitrary expressions", loc),
-                        ));
-                    }
-                }
-
-                if let Some(var_id) = result {
-                    if !vars[var_id.0].used {
-                        continue;
-                    }
-                    let offset = offsets[var_id.0];
-                    f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
-                }
-            }
-            Stmt::Unop {
-                result,
-                operator,
-                operand,
-            } => {
-                if !vars[result.0].used {
-                    continue;
-                }
-                let offset = offsets[result.0];
-                generate_expr(m, &mut f, &offsets, operand, Value::Register(Register::Rax));
-                let mut out_reg = Register::Rax;
-                match operator.kind {
-                    TokenKind::Bang => {
-                        f.push_raw_instr("xor rbx, rbx");
-                        f.push_raw_instr("test rax, rax");
-                        f.push_instr(Instr::Set(Cond::Z, Value::Register(Register::Bl)));
-                        out_reg = Register::Rbx;
-                    }
-                    _ => todo!(),
-                }
-                f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {out_reg}"));
-            }
-            Stmt::Binop {
-                result,
-                operator,
-                lhs,
-                rhs,
-            } => {
-                if !vars[result.0].used {
-                    continue;
-                }
-                let offset = offsets[result.0];
-                generate_expr(m, &mut f, &offsets, lhs, Value::Register(Register::Rax));
-                generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rbx));
-                let mut out_reg = Register::Rax;
-                match operator.kind {
-                    TokenKind::Plus => f.push_raw_instr("add rax, rbx"),
-                    TokenKind::Minus => f.push_raw_instr("sub rax, rbx"),
-                    TokenKind::Asterisk => {
-                        f.push_raw_instr("xor rdx, rdx");
-                        f.push_raw_instr("imul rbx")
-                    }
-                    TokenKind::Percent => {
-                        f.push_raw_instr("cqo");
-                        f.push_raw_instr("idiv rbx");
-                        out_reg = Register::Rdx;
-                    }
-                    TokenKind::Slash => {
-                        f.push_raw_instr("cqo");
-                        f.push_raw_instr("idiv rbx");
-                    }
-                    TokenKind::Lt => {
-                        f.push_raw_instr("xor rdx, rdx");
-                        f.push_raw_instr("cmp rax, rbx");
-                        f.push_instr(Instr::Set(Cond::L, Value::Register(Register::Dl)));
-                        out_reg = Register::Rdx;
-                    }
-                    TokenKind::Eq => {
-                        f.push_raw_instr("xor rdx, rdx");
-                        f.push_raw_instr("cmp rax, rbx");
-                        f.push_instr(Instr::Set(Cond::E, Value::Register(Register::Dl)));
-                        out_reg = Register::Rdx;
-                    }
-                    TokenKind::NotEq => {
-                        f.push_raw_instr("xor rdx, rdx");
-                        f.push_raw_instr("cmp rax, rbx");
-                        f.push_instr(Instr::Set(Cond::NE, Value::Register(Register::Dl)));
-                        out_reg = Register::Rdx;
-                    }
-                    _ => todo!(),
-                }
-                f.push_raw_instr(format!("mov QWORD [rbp-{offset}], {out_reg}"));
-            }
-            Stmt::Assign { lhs, rhs } => match lhs {
-                Expr::Var(token, var_id) => {
-                    if !vars[var_id.0].used {
-                        continue;
-                    }
-                    generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rax));
-
-                    let offset = offsets[var_id.0];
-                    f.push_raw_instr(format!("mov QWORD [rbp-{offset}], rax"));
-                }
-                Expr::Global(token) => {
-                    let name = token.source;
-                    f.push_raw_instr(format!("mov QWORD [_{name}], rax"));
-                }
-                Expr::Deref(token, var_id) => {
-                    generate_expr(m, &mut f, &offsets, rhs, Value::Register(Register::Rbx));
-                    let offset = offsets[var_id.0];
-                    f.push_raw_instr(format!("mov QWORD rax, [rbp-{offset}]"));
-                    f.push_raw_instr(format!("mov QWORD [rax], rbx"));
-
-                    // let name = token.source;
-                    // f.push_raw_instr(format!("mov QWORD rax, [_{name}]"));
-                    // f.push_raw_instr(format!("mov QWORD [rax], rbx"));
-                }
-                _ => todo!("{lhs:?}"),
-            },
-            Stmt::Block(id) => {
-                f.push_block(format!("b{id}"));
-            }
-            Stmt::JZ(cond, id) => {
-                generate_expr(m, &mut f, &offsets, cond, Value::Register(Register::Rax));
-                f.push_raw_instr("test rax, rax");
-                f.push_raw_instr(format!("jz .b{id}"));
-            }
-            Stmt::Jmp(id) => {
-                f.push_raw_instr(format!("jmp .b{id}"));
-            }
-        }
-    }
-
-    m.push_function(f);
-    Ok(())
-}
-
-fn generate_expr(
-    m: &mut Module,
-    f: &mut Function,
-    offsets: &Vec<usize>,
-    expr: Expr,
-    val: Value,
-) {
-    match expr {
-        Expr::StrLit(token) => {
-            let i = m.data.len();
-            let name = format!("str{i}");
-            m.push_data(DataDef::new(
-                &name,
-                DataDirective::Db,
-                vec![DataExpr::Str(token.unescape()), DataExpr::Const(0)],
-            ));
-            f.push_raw_instr(format!("mov {val}, {name}"));
-        }
-        Expr::IntLit(_, lit) => {
-            f.push_raw_instr(format!("mov {val}, {lit}"));
-        }
-        Expr::Var(token, var_id) => {
-            let offset = offsets[var_id.0];
-            f.push_raw_instr(format!("mov {val}, QWORD [rbp-{offset}]"));
-        }
-        Expr::Global(token) => {
-            let name = token.source;
-            f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
-        }
-        Expr::Deref(token, var_id) => {
-            // let name = token.source;
-            // f.push_raw_instr(format!("mov {val}, QWORD _{name}"));
-            // f.push_raw_instr(format!("mov {val}, [{val}]"));
-
-            let offset = offsets[var_id.0];
-            f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
-            f.push_raw_instr(format!("mov {val}, [{val}]"));
-        }
-        Expr::Ref(token, var_id) => {
-            // let name = token.source;
-            // f.push_raw_instr(format!("lea {val}, QWORD _{name}"));
-
-            let offset = offsets[var_id.0];
-            f.push_raw_instr(format!("lea {val}, [rbp-{offset}]"));
-        }
-    }
 }
