@@ -261,7 +261,7 @@ pub enum Value {
     /// Displacement: An integral offset. (normally limited to 32 bits even in 64-bit mode but can be 64-bits with a few select encodings)
     Memory(SizeOperator, Addr),
     Register(Register),
-    Const(SizeOperator, i64),
+    Const(SizeOperator, u64),
     Label(String),
 }
 
@@ -277,9 +277,15 @@ impl From<Register> for Value {
     }
 }
 
-impl From<(SizeOperator, i64)> for Value {
-    fn from(value: (SizeOperator, i64)) -> Self {
+impl From<(SizeOperator, u64)> for Value {
+    fn from(value: (SizeOperator, u64)) -> Self {
         Self::Const(value.0, value.1)
+    }
+}
+
+impl From<u64> for Value {
+    fn from(value: u64) -> Self {
+        Self::Const(SizeOperator::Qword, value)
     }
 }
 
@@ -631,7 +637,9 @@ pub struct Module {
     pub start: Block,
     pub functions: Vec<Function>,
     pub extrn: Vec<String>,
+    pub rodata: Vec<DataDef>,
     pub data: Vec<DataDef>,
+    pub bss:  Vec<DataDef>,
 }
 
 impl Module {
@@ -648,9 +656,9 @@ impl Module {
         self.functions.last_mut().unwrap()
     }
 
-    pub fn push_data(&mut self, data: DataDef) -> &mut DataDef {
-        self.data.push(data);
-        self.data.last_mut().unwrap()
+    pub fn push_rodata(&mut self, rodata: DataDef) -> &mut DataDef {
+        self.rodata.push(rodata);
+        self.rodata.last_mut().unwrap()
     }
 
     pub fn push_raw_instr_to_start(&mut self, instr: impl Into<String>) {
@@ -686,6 +694,17 @@ impl fmt::Display for Module {
             writeln!(f, "{}", func)?;
         }
 
+        if !self.rodata.is_empty() {
+            if self.link_with_c {
+                writeln!(f, "section \".rodata\"")?;
+            } else {
+                writeln!(f, "segment readable writable")?;
+            }
+        }
+        for data in self.rodata.iter() {
+            writeln!(f, "{}", data)?;
+        }
+
         if !self.data.is_empty() {
             if self.link_with_c {
                 writeln!(f, "section \".data\" writable")?;
@@ -694,6 +713,17 @@ impl fmt::Display for Module {
             }
         }
         for data in self.data.iter() {
+            writeln!(f, "{}", data)?;
+        }
+
+        if !self.bss.is_empty() {
+            if self.link_with_c {
+                writeln!(f, "section \".bss\" writable")?;
+            } else {
+                writeln!(f, "segment readable writable")?;
+            }
+        }
+        for data in self.bss.iter() {
             writeln!(f, "{}", data)?;
         }
         Ok(())
