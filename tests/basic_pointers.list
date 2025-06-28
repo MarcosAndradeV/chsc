@@ -1,0 +1,2 @@
+cargo run -q --bin chsc -- -r --use-c tests/basic_pointers.chs
+rm tests/basic_pointers tests/basic_pointers.o tests/basic_pointers.asm
