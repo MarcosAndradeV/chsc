@@ -120,6 +120,24 @@ fn generate_func(func: Func<'_>, f: &mut Function, m: &mut Module) -> Result<(),
                         f.push_instr(Instr::Set(Cond::L, Value::Register(Register::Dl)));
                         l.init(Value::from(Register::Rdx));
                     }
+                    TokenKind::LtEq => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr(format!("cmp {l}, {r}"));
+                        f.push_instr(Instr::Set(Cond::LE, Value::Register(Register::Dl)));
+                        l.init(Value::from(Register::Rdx));
+                    }
+                    TokenKind::Gt => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr(format!("cmp {l}, {r}"));
+                        f.push_instr(Instr::Set(Cond::G, Value::Register(Register::Dl)));
+                        l.init(Value::from(Register::Rdx));
+                    }
+                    TokenKind::GtEq => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr(format!("cmp {l}, {r}"));
+                        f.push_instr(Instr::Set(Cond::GE, Value::Register(Register::Dl)));
+                        l.init(Value::from(Register::Rdx));
+                    }
                     TokenKind::Eq => {
                         f.push_raw_instr("xor rdx, rdx");
                         f.push_raw_instr(format!("cmp {l}, {r}"));
