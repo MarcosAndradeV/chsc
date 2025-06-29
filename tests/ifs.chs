@@ -1,8 +1,7 @@
-extern printf;
+extern fn printf(ptr, ...) -> int;
 
-fn main() {
-    var x;
-    x = 7;
+fn main() -> int {
+    var x int = 7;
     if(x < 10)
         printf("%d < 10\n", x);
     else if(5 < x)
