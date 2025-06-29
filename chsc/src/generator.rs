@@ -262,6 +262,9 @@ fn generate_expr(
                 _ => todo!(),
             }
         }
+        Expr::Cast(_, _, expr) => {
+            generate_expr(m, f, offsets, *expr, dst)?;
+        }
         _ => todo!("Expression: {expr}"),
     }
     Ok(())

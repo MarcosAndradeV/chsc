@@ -36,7 +36,7 @@ pub fn parse<'src>(
     lexer.set_is_keyword_fn(|s| {
         matches!(
             s,
-            "extern" | "fn" | "return" | "var" | "if" | "else" | "while" | "syscall"
+            "extern" | "fn" | "return" | "var" | "if" | "else" | "while" | "syscall" | "cast"
         )
     });
     let mut p = Program::default();
@@ -111,7 +111,12 @@ fn parse_extern<'src>(
 
             expect(lexer, TokenKind::SemiColon, None::<&str>)?;
 
-            return Ok(Extern::Func { name, args, is_variadic, ret });
+            return Ok(Extern::Func {
+                name,
+                args,
+                is_variadic,
+                ret,
+            });
         }
         _ => todo!("{token}"),
     }
@@ -187,7 +192,12 @@ fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> 
             "int" => Ok(Type::Int),
             "ptr" => Ok(Type::Ptr),
             "bool" => Ok(Type::Bool),
+            "char" => Ok(Type::Char),
             _ => unexpected_token(token, Some("Expected type")),
+        },
+        TokenKind::Asterisk => {
+            let ty = parse_type(lexer)?;
+            Ok(Type::PtrTo(Box::new(ty)))
         }
         _ => unexpected_token(token, Some("Expected type")),
     }
@@ -445,6 +455,14 @@ fn parse_expr<'src>(
             )?;
             expect(lexer, TokenKind::CloseParen, Some("Expected `)`."))?;
             expr
+        }
+        TokenKind::Keyword if left_token.source == "cast" => {
+            curr_precedence = Precedence::Highest;
+            expect(lexer, TokenKind::OpenParen, None::<&str>)?;
+            let ty = parse_type(lexer)?;
+            expect(lexer, TokenKind::CloseParen, None::<&str>)?;
+            let expr = parse_expr(lexer, curr_fn, names_index, precedence, stop)?;
+            Expr::Cast(left_token.loc, ty, Box::new(expr))
         }
         TokenKind::Identifier => {
             curr_precedence = Precedence::Highest;

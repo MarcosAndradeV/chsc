@@ -131,21 +131,33 @@ pub struct Func<'src> {
     pub body: Vec<Stmt<'src>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Ptr,
     Bool,
+    Char,
     Void,
+    PtrTo(Box<Self>),
+}
+impl Type {
+    pub fn deref_as_inner_type(&self) -> Type {
+        match self {
+            Self::PtrTo(ty) => *ty.to_owned(),
+            other => other.clone(),
+        }
+    }
 }
 
 impl<'src> std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Int => write!(f, "int"),
-            Type::Ptr => write!(f, "ptr"),
-            Type::Bool => write!(f, "bool"),
-            Type::Void => write!(f, "void"),
+            Self::Int => write!(f, "int"),
+            Self::Ptr => write!(f, "ptr"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
+            Self::Void => write!(f, "void"),
+            Self::PtrTo(ty) => write!(f, "*{ty}"),
         }
     }
 }
@@ -190,12 +202,14 @@ pub enum Stmt<'src> {
 pub enum Expr<'src> {
     IntLit(Loc<'src>, u64),
     StrLit(Token<'src>),
-    Var(Token<'src>, VarId),
 
+    Var(Token<'src>, VarId),
     Global(Token<'src>),
 
     Deref(Token<'src>, VarId),
     Ref(Token<'src>, VarId),
+
+    Cast(Loc<'src>, Type, Box<Self>),
 }
 
 impl<'src> Expr<'src> {
@@ -207,6 +221,7 @@ impl<'src> Expr<'src> {
             Expr::Global(token) => token.loc,
             Expr::Deref(token, _) => token.loc,
             Expr::Ref(token, _) => token.loc,
+            Expr::Cast(loc, ..) => *loc,
         }
     }
 }
@@ -220,6 +235,7 @@ impl<'src> std::fmt::Display for Expr<'src> {
             Expr::Global(token) => write!(f, "{token}"),
             Expr::Deref(_, VarId(id)) => write!(f, "Deref({})", id),
             Expr::Ref(_, VarId(id)) => write!(f, "Ref({})", id),
+            Expr::Cast(_, ty, e) => write!(f, "cast({ty}){e}"),
         }
     }
 }

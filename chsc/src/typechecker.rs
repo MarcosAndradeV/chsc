@@ -125,12 +125,12 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
         env.insert_global(func.name.source, TypeCons::Func(i));
         env.push_scope();
         for (i, ty) in func.args_types.iter().enumerate() {
-            env.insert_local(VarId(i), TypeCons::Var(*ty));
+            env.insert_local(VarId(i), TypeCons::Var(ty.clone()));
         }
         if func.ret_type.is_none() {
             ret = ReturnFlow::Always;
         }
-        ret_type = func.ret_type.unwrap_or(Type::Void);
+        ret_type = func.ret_type.clone().unwrap_or(Type::Void);
         for stmt in func.body.iter() {
             let flow = match stmt {
                 Stmt::Return(loc, expr) => {
@@ -154,10 +154,18 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
                     target: (token, var_id),
                     rhs,
                 } => {
-                    if let Some(vty) = func.vars[var_id.0].ty {
-                        let ty = Type::Ptr;
-                        if vty != ty {
-                            return Err(TypeError::IncompatibleType(token.loc, ty, vty));
+                    if let Some(vty) = func.vars[var_id.0].ty.clone() {
+                        match vty {
+                            Type::Ptr => {}
+                            Type::PtrTo(ref inner) => {
+                                let ty = type_of_expr(&env, rhs)?;
+                                if inner.as_ref() != &ty {
+                                    return Err(TypeError::IncompatibleType(token.loc, ty, vty));
+                                }
+                            }
+                            _ => {
+                                return Err(TypeError::IncompatibleType(token.loc, Type::Ptr, vty));
+                            }
                         }
                     } else {
                         todo!()
@@ -169,7 +177,7 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
                     rhs,
                 } => {
                     let ty = type_of_expr(&env, rhs)?;
-                    if let Some(vty) = func.vars[var_id.0].ty {
+                    if let Some(vty) = func.vars[var_id.0].ty.clone() {
                         if vty != ty {
                             return Err(TypeError::IncompatibleType(token.loc, ty, vty));
                         }
@@ -193,7 +201,7 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
                     let lhs = type_of_expr(&env, lhs)?;
                     let rhs = type_of_expr(&env, rhs)?;
                     let ty = binop_typecheck(lhs, operator, rhs)?;
-                    env.insert_local(*result, TypeCons::Var(ty));
+                    env.insert_local(*result, TypeCons::Var(ty.clone()));
                     func.vars[result.0].ty = Some(ty);
                     ReturnFlow::Never
                 }
@@ -230,13 +238,16 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
                                 return Err(TypeError::IncompatibleType(
                                     actual.loc(),
                                     actual_ty,
-                                    *expect_ty,
+                                    expect_ty.clone(),
                                 ));
                             }
                         }
                         if let Some(res) = result {
-                            env.insert_local(*res, TypeCons::Var(ret.unwrap_or(Type::Void)));
-                            func.vars[res.0].ty = *ret;
+                            env.insert_local(
+                                *res,
+                                TypeCons::Var(ret.clone().unwrap_or(Type::Void)),
+                            );
+                            func.vars[res.0].ty = ret.clone();
                         }
                     }
                     ReturnFlow::Never
@@ -270,15 +281,18 @@ fn binop_typecheck<'src>(lhs: Type, op: &Token<'src>, rhs: Type) -> Result<Type,
                 return Ok(Type::Bool);
             }
         }
-        op => match (lhs, op, rhs) {
+        op => match (&lhs, op, &rhs) {
             (Type::Int, Plus | Minus | Asterisk | Slash | Percent, Type::Int) => {
                 return Ok(Type::Int);
             }
-            (Type::Ptr, Plus, Type::Int) | (Type::Int, Plus, Type::Ptr) => {
-                return Ok(Type::Ptr);
+            (Type::Ptr | Type::PtrTo(..), Plus, Type::Int) => {
+                return Ok(lhs);
+            }
+            (Type::Int, Plus, Type::Ptr | Type::PtrTo(..)) => {
+                return Ok(rhs);
             }
             _ => {}
-        }
+        },
         _ => {}
     }
     return Err(TypeError::IncompatibleType(op.loc, lhs, rhs));
@@ -287,11 +301,11 @@ fn binop_typecheck<'src>(lhs: Type, op: &Token<'src>, rhs: Type) -> Result<Type,
 fn type_of_expr<'src>(env: &TypeEnv<'src>, expr: &Expr<'src>) -> Result<Type, TypeError<'src>> {
     match expr {
         Expr::IntLit(..) => Ok(Type::Int),
-        Expr::StrLit(..) => Ok(Type::Ptr),
+        Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, id) => {
             if let Some(v) = env.get_local(id) {
                 match v {
-                    TypeCons::Var(ty) => return Ok(*ty),
+                    TypeCons::Var(ty) => return Ok(ty.clone()),
                     TypeCons::Func(_) => todo!(),
                     TypeCons::ExternFunc(_) => todo!(),
                 }
@@ -300,7 +314,28 @@ fn type_of_expr<'src>(env: &TypeEnv<'src>, expr: &Expr<'src>) -> Result<Type, Ty
             }
         }
         Expr::Global(token) => todo!(),
-        Expr::Deref(token, var_id) => todo!(),
-        Expr::Ref(..) => Ok(Type::Ptr),
+        Expr::Deref(token, id) => {
+            if let Some(v) = env.get_local(id) {
+                match v {
+                    TypeCons::Var(ty) => return Ok(ty.deref_as_inner_type()),
+                    TypeCons::Func(_) => todo!(),
+                    TypeCons::ExternFunc(_) => todo!(),
+                }
+            } else {
+                todo!("Undefined {token}")
+            }
+        }
+        Expr::Ref(token, id) => {
+            if let Some(v) = env.get_local(id) {
+                match v {
+                    TypeCons::Var(ty) => return Ok(Type::PtrTo(Box::new(ty.clone()))),
+                    TypeCons::Func(_) => todo!(),
+                    TypeCons::ExternFunc(_) => todo!(),
+                }
+            } else {
+                todo!("Undefined {token}")
+            }
+        }
+        Expr::Cast(_, ty, _) => Ok(ty.clone()),
     }
 }
