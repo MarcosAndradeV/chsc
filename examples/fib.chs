@@ -1,12 +1,13 @@
-extern printf;
+extern fn printf(ptr, ...) -> int;
 
-fn main() {
-    var a = 0;
-    var b = 1;
+fn main() -> int {
+    var a int = 0;
+    var b int = 1;
     while(a < 100) {
         printf("%d\n", a);
-        var c = b;
+        var c int = b;
         b = a + b;
         a = c;
     }
+    return 0;
 }
