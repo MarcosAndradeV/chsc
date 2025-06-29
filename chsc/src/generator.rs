@@ -13,8 +13,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
 
     for r#extern in ast.externs {
         match r#extern {
-            Extern::Symbol(token) => m.push_extrn(token.source),
-            Extern::Func(func) => todo!(),
+            Extern::Func{name, ..} => m.push_extrn(name.source),
             Extern::Var(var) => todo!(),
         }
     }
@@ -292,10 +291,10 @@ impl std::fmt::Display for UinitValue {
 
 fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offsets = vec![0; vars.len()];
-    let mut offset = 8usize;
+    let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
-        offsets[i] = offset;
         offset += 8;
+        offsets[i] = offset;
     }
     (vars.len() * 8, offsets)
 }

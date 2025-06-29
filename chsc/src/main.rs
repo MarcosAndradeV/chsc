@@ -11,6 +11,7 @@ use crate::chslexer::*;
 
 use crate::generator::generate;
 use crate::opt::*;
+use crate::typechecker::type_check_program;
 use crate::utils::*;
 
 mod ast;
@@ -20,6 +21,7 @@ mod opt;
 mod parser;
 mod utils;
 mod generator;
+mod typechecker;
 
 fn main() {
     match app() {
@@ -48,6 +50,8 @@ fn app() -> Result<(), AppError> {
     // for func in &mut program_ast.funcs {
     //     mark_used_variables(func);
     // }
+
+    type_check_program(&mut program_ast).map_err(|e| AppError::ParseError(format!("{}", e)))?;
 
     if debug_ast {
         print_program(&program_ast);

@@ -72,13 +72,46 @@ fn parse_extern<'src>(
     let token = lexer.next_token();
 
     match token.kind {
-        TokenKind::Identifier => {
-            expect(
-                lexer,
-                TokenKind::SemiColon,
-                Some("Expected `;` after the symbol name."),
-            )?;
-            return Ok(Extern::Symbol(token));
+        TokenKind::Keyword if token.source == "fn" => {
+            let name = expect(lexer, TokenKind::Identifier, None::<&str>)?;
+            let mut args = vec![];
+            let mut is_variadic = false;
+            let mut ret = None;
+
+            expect(lexer, TokenKind::OpenParen, None::<&str>)?;
+
+            loop {
+                let ptoken = lexer.peek_token();
+                match ptoken.kind {
+                    TokenKind::CloseParen => {
+                        lexer.next_token();
+                        if inspect(lexer, &[TokenKind::Arrow])? {
+                            lexer.next_token();
+                            ret = Some(parse_type(lexer)?);
+                        }
+                        break;
+                    }
+                    TokenKind::Comma => {
+                        lexer.next_token();
+                    }
+                    _ => {}
+                }
+                if inspect(lexer, &[TokenKind::Splat])? {
+                    lexer.next_token();
+                    is_variadic = true;
+                    expect(lexer, TokenKind::CloseParen, None::<&str>)?;
+                    if inspect(lexer, &[TokenKind::Arrow])? {
+                        lexer.next_token();
+                        ret = Some(parse_type(lexer)?);
+                    }
+                    break;
+                }
+                args.push(parse_type(lexer)?);
+            }
+
+            expect(lexer, TokenKind::SemiColon, None::<&str>)?;
+
+            return Ok(Extern::Func { name, args, is_variadic, ret });
         }
         _ => todo!("{token}"),
     }
@@ -102,6 +135,10 @@ fn parse_fn<'src>(
         match ptoken.kind {
             TokenKind::CloseParen => {
                 lexer.next_token();
+                if inspect(lexer, &[TokenKind::Arrow])? {
+                    lexer.next_token();
+                    func.ret_type = Some(parse_type(lexer)?);
+                }
                 break;
             }
             TokenKind::Comma => {
@@ -113,8 +150,9 @@ fn parse_fn<'src>(
                 let id = VarId(func.vars.len());
                 names_index.insert_var_index(token.source, Names::Var(id));
                 func.vars.push(Var::new(token));
-
-                func.args.push((token, Type::Name(token)));
+                let ty = parse_type(lexer)?;
+                func.args.push(token);
+                func.args_types.push(ty);
             }
             _ => {}
         }
@@ -142,6 +180,19 @@ fn parse_fn<'src>(
     Ok(func)
 }
 
+fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> {
+    let token = lexer.next_token();
+    match token.kind {
+        TokenKind::Identifier => match token.source {
+            "int" => Ok(Type::Int),
+            "ptr" => Ok(Type::Ptr),
+            "bool" => Ok(Type::Bool),
+            _ => unexpected_token(token, Some("Expected type")),
+        }
+        _ => unexpected_token(token, Some("Expected type")),
+    }
+}
+
 fn parse_stmt<'src>(
     lexer: &mut PeekableLexer<'src>,
     curr_fn: &mut Func<'src>,
@@ -152,11 +203,8 @@ fn parse_stmt<'src>(
         TokenKind::Keyword if token.source == "var" => {
             lexer.next_token();
             let token = expect(lexer, TokenKind::Identifier, None::<&str>)?;
-            let id = VarId(curr_fn.vars.len());
-            names_index.insert_var_index(token.source, Names::Var(id));
-            curr_fn.vars.push(Var::new(token));
-
-            if inspect(lexer, &[TokenKind::Assign])? {
+            let ty = parse_type(lexer)?;
+            let id = if inspect(lexer, &[TokenKind::Assign])? {
                 lexer.next_token();
                 let rhs = parse_expr(
                     lexer,
@@ -165,11 +213,18 @@ fn parse_stmt<'src>(
                     Precedence::Lowest,
                     &[TokenKind::SemiColon],
                 )?;
+                let var_id = VarId(curr_fn.vars.len());
                 curr_fn.body.push(Stmt::AssignVar {
-                    var: (token, id),
+                    var: (token, var_id),
                     rhs,
                 });
-            }
+                var_id
+            } else {
+                VarId(curr_fn.vars.len())
+            };
+
+            names_index.insert_var_index(token.source, Names::Var(id));
+            curr_fn.vars.push(Var::new(token).r#type(ty));
 
             expect(lexer, TokenKind::SemiColon, None::<&str>)?;
 
@@ -424,6 +479,7 @@ fn parse_expr<'src>(
         match (&left, ptoken.kind) {
             (Expr::Global(token), TokenKind::OpenParen) => {
                 lexer.next_token();
+                curr_precedence = Precedence::Call;
                 let mut args = collect_args(lexer, curr_fn, names_index)?;
                 let id = VarId(curr_fn.vars.len());
                 curr_fn.vars.push(Var::new(*token));
@@ -523,11 +579,8 @@ fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T
 }
 
 fn undefined<T>(token: Token<'_>) -> Result<T, ParserError<'_>> {
-    Err(ParserError::Undefined(
-        token,
-    ))
+    Err(ParserError::Undefined(token))
 }
-
 
 fn inspect<'src>(
     lexer: &mut PeekableLexer<'src>,

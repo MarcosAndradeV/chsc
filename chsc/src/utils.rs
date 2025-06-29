@@ -195,6 +195,7 @@ pub enum AppError {
     ArgumentError(String),
     FileError { path: String, error: std::io::Error },
     ParseError(String),
+    TypeError(String),
     GenerationError(Option<String>, String),
 }
 
@@ -205,6 +206,7 @@ impl Display for AppError {
             AppError::ArgumentError(msg) => write!(f, "Argument error: {}", msg),
             AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
             AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
             AppError::GenerationError(_, msg) => write!(f, "Code generation error: {}", msg),
         }
     }
@@ -346,6 +348,9 @@ pub fn handle_app_error(error: &AppError) {
             _ => {}
         },
         AppError::ParseError(error) => {
+            eprintln!("{}", error);
+        }
+        AppError::TypeError(error) => {
             eprintln!("{}", error);
         }
         AppError::GenerationError(hint, error) => {

@@ -57,16 +57,31 @@ pub struct VarId(pub usize);
 
 #[derive(Debug)]
 pub enum Extern<'src> {
-    Symbol(Token<'src>),
-    Func(Func<'src>),
+    Func {
+        name: Token<'src>,
+        args: Vec<Type>,
+        is_variadic: bool,
+        ret: Option<Type>,
+    },
     Var(Var<'src>),
 }
 impl<'src> Extern<'src> {
     pub fn name(&self) -> &'src str {
         match self {
-            Extern::Symbol(token) => token.source,
-            Extern::Func(func) => func.name.source,
+            Extern::Func { name, .. } => name.source,
             Extern::Var(var) => var.token.source,
+        }
+    }
+
+    pub fn as_func_(&self) -> (&Token<'src>, &Vec<Type>, bool, &Option<Type>) {
+        match self {
+            Extern::Func {
+                name,
+                args,
+                is_variadic,
+                ret,
+            } => (name, args, *is_variadic, ret),
+            _ => todo!(),
         }
     }
 }
@@ -74,7 +89,7 @@ impl<'src> Extern<'src> {
 #[derive(Debug)]
 pub struct Var<'src> {
     pub token: Token<'src>,
-    pub ty: Option<Type<'src>>,
+    pub ty: Option<Type>,
     // pub used: bool,
 }
 
@@ -84,6 +99,14 @@ impl<'src> Var<'src> {
             token,
             ty: None,
             // used: false,
+        }
+    }
+
+    pub fn r#type(self, ty: Type) -> Self {
+        Self {
+            token: self.token,
+            ty: Some(ty),
+            // used: true,
         }
     }
 
@@ -99,17 +122,32 @@ impl<'src> Var<'src> {
 #[derive(Debug, Default)]
 pub struct Func<'src> {
     pub name: Token<'src>,
-    pub args: Vec<(Token<'src>, Type<'src>)>,
-    pub ret_type: Option<Type<'src>>,
+    pub args: Vec<Token<'src>>,
+    pub args_types: Vec<Type>,
+    pub ret_type: Option<Type>,
 
     pub vars: Vec<Var<'src>>,
     pub block_count: usize,
     pub body: Vec<Stmt<'src>>,
 }
 
-#[derive(Debug, Clone)]
-pub enum Type<'src> {
-    Name(Token<'src>),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    Int,
+    Ptr,
+    Bool,
+    Void,
+}
+
+impl<'src> std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Int => write!(f, "int"),
+            Type::Ptr => write!(f, "ptr"),
+            Type::Bool => write!(f, "bool"),
+            Type::Void => write!(f, "void"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -212,7 +250,6 @@ impl Precedence {
 
         let r = match kind {
             // Assign => Self::Assignment,
-
             DoublePipe => Self::LogicalOr,
             DoubleAmpersand => Self::LogicalAnd,
 
@@ -244,12 +281,27 @@ use crate::*;
 pub fn print_program(program: &Program) {
     for ext in &program.externs {
         match ext {
-            Extern::Symbol(tok) => {
-                println!("extern symbol: {}", tok);
-            }
-            Extern::Func(func) => {
-                println!("extern func:");
-                print_func(func);
+            Extern::Func {
+                name,
+                args,
+                is_variadic,
+                ret,
+            } => {
+                print!("extern fn {}(", name);
+                for (i, arg) in args.iter().enumerate() {
+                    print!("{}", arg);
+                    if i < args.len() - 1 {
+                        print!(", ");
+                    }
+                }
+                if *is_variadic {
+                    print!(", ...");
+                }
+                print!(")");
+                if let Some(ret) = ret {
+                    print!("-> {}", ret);
+                }
+                println!(";");
             }
             Extern::Var(var) => {
                 println!("extern var: {}{:?}", var.token, var.ty);
@@ -287,7 +339,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
         }
         Stmt::AssignVar { var, rhs } => {
             println!("Var({}) = {};", var.1.0, rhs);
-        },
+        }
         Stmt::Return(_, expr) => match expr {
             Some(e) => println!("return {};", e),
             None => println!("return;"),
