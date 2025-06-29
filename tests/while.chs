@@ -1,4 +1,4 @@
-extern fn printf(ptr, ...) -> int;
+extern fn printf(*char, ...) -> int;
 
 fn main() -> int {
     var i int = 0;

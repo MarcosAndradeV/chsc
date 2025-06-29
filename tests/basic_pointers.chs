@@ -1,8 +1,8 @@
-extern fn printf(ptr, ...) -> int;
+extern fn printf(*char, ...) -> int;
 
 fn main() -> int {
     var x int = 10;
-    var p ptr = &x;
+    var p *int = &x;
 
     printf("*p(%d) == x(%d)\n", *p, x);
 

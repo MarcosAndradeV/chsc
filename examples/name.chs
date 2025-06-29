@@ -1,15 +1,15 @@
 
 extern fn malloc(int) -> ptr;
 extern fn memset(ptr, int, int) -> ptr;
-extern fn printf(ptr, ...) -> int;
-extern fn getchar() -> int;
+extern fn printf(*char, ...) -> int;
+extern fn getchar() -> char;
 
-fn read_str(buf ptr, len int) -> int {
+fn read_str(buf *char, len int) -> int {
     var i int = 0;
     while(i < len) {
-        var c int = getchar();
+        var c char = getchar();
         *(buf + i) = c;
-        if(c == 10) return i;
+        if(c == cast(char)10) return i;
         i = i + 1;
     }
     return len;
@@ -17,8 +17,8 @@ fn read_str(buf ptr, len int) -> int {
 
 fn main() -> int {
     var n int = 256;
-    var name ptr = malloc(n);
-    memset(name, 0, n);
+    var name *char = cast(*char)malloc(n);
+    memset(cast(ptr)name, 0, n);
     printf("What is your name?\n");
     n = read_str(name, n);
     printf("Hello, %s\n", name);

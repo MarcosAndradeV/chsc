@@ -1,4 +1,4 @@
-extern fn printf(ptr, ...) -> int;
+extern fn printf(*char, ...) -> int;
 
 fn foo(n int) {
     printf("foo: %d\n", n);
