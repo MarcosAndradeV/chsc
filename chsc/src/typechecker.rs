@@ -147,6 +147,11 @@ pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'
         for (i, ty) in func.args_types.iter().enumerate() {
             env.insert_local(VarId(i), TypeCons::Var(ty.clone()));
         }
+        for (i, var) in func.vars.iter().enumerate() {
+            if let Some(ty) = &var.ty {
+                env.insert_local(VarId(i), TypeCons::Var(ty.clone()));
+            }
+        }
         if func.ret_type.is_none() {
             ret = ReturnFlow::Always;
         }
