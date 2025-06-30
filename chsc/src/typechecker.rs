@@ -50,6 +50,7 @@ enum TypeCons {
     Var(Type),
     Func(usize),
     ExternFunc(usize),
+    StructId(usize),
 }
 
 #[derive(Debug, Default)]
@@ -110,6 +111,25 @@ impl ReturnFlow {
 pub fn type_check_program<'src>(p: &mut Program<'src>) -> Result<(), TypeError<'src>> {
     let mut env = TypeEnv::default();
     env.push_scope();
+    for id in 0..p.typedefs.len() {
+        let tdef = unsafe { p.typedefs.as_ptr().add(id).cast_mut().as_mut().unwrap() };
+        match tdef {
+            TypeDef::Struct(sdef) => {
+                let mut offset = 0usize;
+                let size = {
+                    let mut size = 0;
+                    for f in sdef.fields.iter_mut() {
+                        f.offset = offset;
+                        offset = f.ty.size(&p.typedefs);
+                        size += offset;
+                    }
+                    size
+                };
+                sdef.size = size;
+                env.insert_global(sdef.name.source, TypeCons::StructId(id));
+            }
+        }
+    }
     for (i, ele) in p.externs.iter().enumerate() {
         match ele {
             Extern::Func { name, .. } => {
@@ -306,8 +326,8 @@ fn type_of_expr<'src>(env: &TypeEnv<'src>, expr: &Expr<'src>) -> Result<Type, Ty
             if let Some(v) = env.get_local(id) {
                 match v {
                     TypeCons::Var(ty) => return Ok(ty.clone()),
-                    TypeCons::Func(_) => todo!(),
-                    TypeCons::ExternFunc(_) => todo!(),
+                    TypeCons::StructId(id) => return Ok(Type::TypeId(*id)),
+                    _ => todo!(),
                 }
             } else {
                 todo!("Undefined {token}")
@@ -317,9 +337,8 @@ fn type_of_expr<'src>(env: &TypeEnv<'src>, expr: &Expr<'src>) -> Result<Type, Ty
         Expr::Deref(token, id) => {
             if let Some(v) = env.get_local(id) {
                 match v {
-                    TypeCons::Var(ty) => return Ok(ty.deref_as_inner_type()),
-                    TypeCons::Func(_) => todo!(),
-                    TypeCons::ExternFunc(_) => todo!(),
+                    TypeCons::Var(Type::PtrTo(ty)) => return Ok(*ty.to_owned()),
+                    _ => todo!(),
                 }
             } else {
                 todo!("Undefined {token}")
@@ -329,8 +348,8 @@ fn type_of_expr<'src>(env: &TypeEnv<'src>, expr: &Expr<'src>) -> Result<Type, Ty
             if let Some(v) = env.get_local(id) {
                 match v {
                     TypeCons::Var(ty) => return Ok(Type::PtrTo(Box::new(ty.clone()))),
-                    TypeCons::Func(_) => todo!(),
-                    TypeCons::ExternFunc(_) => todo!(),
+                    TypeCons::StructId(id) => return Ok(Type::PtrTo(Box::new(Type::TypeId(*id)))),
+                    _ => todo!(),
                 }
             } else {
                 todo!("Undefined {token}")

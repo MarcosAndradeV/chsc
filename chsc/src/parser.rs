@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+
 use crate::{ast::*, chslexer::*};
 
 #[derive(Debug)]
@@ -36,11 +38,22 @@ pub fn parse<'src>(
     lexer.set_is_keyword_fn(|s| {
         matches!(
             s,
-            "extern" | "fn" | "return" | "var" | "if" | "else" | "while" | "syscall" | "cast"
+            "extern"
+                | "type"
+                | "struct"
+                | "fn"
+                | "return"
+                | "var"
+                | "if"
+                | "else"
+                | "while"
+                | "syscall"
+                | "cast"
         )
     });
     let mut p = Program::default();
     let mut names_index = NameSpace::default();
+    let mut typedefs = TypeDefIndex::default();
     names_index.push_scope();
 
     loop {
@@ -50,24 +63,79 @@ pub fn parse<'src>(
         }
         match token.kind {
             TokenKind::Keyword if token.source == "fn" => {
-                let fn_ = parse_fn(&mut lexer, &mut names_index)?;
-                p.funcs.push(fn_);
+                let r#fn = parse_fn(&mut lexer, &mut names_index, &typedefs)?;
+                p.funcs.push(r#fn);
             }
             TokenKind::Keyword if token.source == "extern" => {
-                let r#extern = parse_extern(&mut lexer, &mut names_index)?;
+                let r#extern = parse_extern(&mut lexer, &mut names_index, &typedefs)?;
                 names_index.insert_var_index(r#extern.name(), Names::Global);
                 p.externs.push(r#extern);
             }
-            _ => todo!("{token}"),
+            TokenKind::Keyword if token.source == "struct" => {
+                parse_struct_def(&mut lexer, &mut typedefs, &mut p.typedefs)?;
+            }
+            _ => unexpected_token(token, Some("Expected a top level definition"))?,
         }
     }
 
     return Ok(p);
 }
 
+fn parse_struct_def<'src>(
+    lexer: &mut PeekableLexer<'src>,
+    typedefs_index: &mut TypeDefIndex<'src>,
+    typedefs: &mut Vec<TypeDef<'src>>,
+) -> ParseResult<'src, ()> {
+    let name = expect(lexer, TokenKind::Identifier, None::<&str>)?;
+    let name_str = name.source;
+    match typedefs_index.0.get(name_str) {
+        Some(_) => {}
+        None => {}
+    };
+
+    let mut fields = vec![];
+
+    expect(lexer, TokenKind::OpenBrace, None::<&str>)?;
+
+    loop {
+        let ptoken = lexer.peek_token();
+        match ptoken.kind {
+            TokenKind::CloseBrace => {
+                lexer.next_token();
+                break;
+            }
+            TokenKind::SemiColon => {
+                lexer.next_token();
+                continue;
+            }
+            _ => {}
+        }
+
+        let name = expect(lexer, TokenKind::Identifier, Some("Expeceted identifier"))?;
+        let ty = parse_type(lexer, typedefs_index)?;
+        fields.push(StructField {
+            name,
+            ty,
+            offset: 0,
+        });
+    }
+
+    let r#struct = StructDef {
+        name,
+        fields,
+        size: 0,
+    };
+    let uid = typedefs.len();
+    typedefs_index.0.insert(name_str, uid);
+    typedefs.push(TypeDef::Struct(r#struct));
+
+    Ok(())
+}
+
 fn parse_extern<'src>(
     lexer: &mut PeekableLexer<'src>,
     vars_index: &mut NameSpace<'src>,
+    typedefs: &TypeDefIndex<'src>,
 ) -> ParseResult<'src, Extern<'src>> {
     let token = lexer.next_token();
 
@@ -87,7 +155,7 @@ fn parse_extern<'src>(
                         lexer.next_token();
                         if inspect(lexer, &[TokenKind::Arrow])? {
                             lexer.next_token();
-                            ret = Some(parse_type(lexer)?);
+                            ret = Some(parse_type(lexer, typedefs)?);
                         }
                         break;
                     }
@@ -102,11 +170,11 @@ fn parse_extern<'src>(
                     expect(lexer, TokenKind::CloseParen, None::<&str>)?;
                     if inspect(lexer, &[TokenKind::Arrow])? {
                         lexer.next_token();
-                        ret = Some(parse_type(lexer)?);
+                        ret = Some(parse_type(lexer, typedefs)?);
                     }
                     break;
                 }
-                args.push(parse_type(lexer)?);
+                args.push(parse_type(lexer, typedefs)?);
             }
 
             expect(lexer, TokenKind::SemiColon, None::<&str>)?;
@@ -125,6 +193,7 @@ fn parse_extern<'src>(
 fn parse_fn<'src>(
     lexer: &mut PeekableLexer<'src>,
     names_index: &mut NameSpace<'src>,
+    typedefs: &TypeDefIndex<'src>,
 ) -> ParseResult<'src, Func<'src>> {
     let name = expect(lexer, TokenKind::Identifier, None::<&str>)?;
     names_index.insert_var_index(name.source, Names::Global);
@@ -142,7 +211,7 @@ fn parse_fn<'src>(
                 lexer.next_token();
                 if inspect(lexer, &[TokenKind::Arrow])? {
                     lexer.next_token();
-                    func.ret_type = Some(parse_type(lexer)?);
+                    func.ret_type = Some(parse_type(lexer, typedefs)?);
                 }
                 break;
             }
@@ -155,7 +224,7 @@ fn parse_fn<'src>(
                 let id = VarId(func.vars.len());
                 names_index.insert_var_index(token.source, Names::Var(id));
                 func.vars.push(Var::new(token));
-                let ty = parse_type(lexer)?;
+                let ty = parse_type(lexer, typedefs)?;
                 func.args.push(token);
                 func.args_types.push(ty);
             }
@@ -176,7 +245,7 @@ fn parse_fn<'src>(
                 break;
             }
             _ => {
-                parse_stmt(lexer, &mut func, names_index)?;
+                parse_stmt(lexer, &mut func, names_index, typedefs)?;
             }
         }
     }
@@ -185,7 +254,10 @@ fn parse_fn<'src>(
     Ok(func)
 }
 
-fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> {
+fn parse_type<'src>(
+    lexer: &mut PeekableLexer<'src>,
+    typedefs: &TypeDefIndex<'src>,
+) -> ParseResult<'src, Type> {
     let token = lexer.next_token();
     match token.kind {
         TokenKind::Identifier => match token.source {
@@ -193,10 +265,16 @@ fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> 
             "ptr" => Ok(Type::Ptr),
             "bool" => Ok(Type::Bool),
             "char" => Ok(Type::Char),
-            _ => unexpected_token(token, Some("Expected type")),
+            name => {
+                return if let Some(id) = typedefs.0.get(name) {
+                    Ok(Type::TypeId(*id))
+                } else {
+                    unexpected_token(token, Some("Expected type"))
+                };
+            }
         },
         TokenKind::Asterisk => {
-            let ty = parse_type(lexer)?;
+            let ty = parse_type(lexer, typedefs)?;
             Ok(Type::PtrTo(Box::new(ty)))
         }
         _ => unexpected_token(token, Some("Expected type")),
@@ -207,13 +285,14 @@ fn parse_stmt<'src>(
     lexer: &mut PeekableLexer<'src>,
     curr_fn: &mut Func<'src>,
     names_index: &mut NameSpace<'src>,
+    typedefs: &TypeDefIndex<'src>,
 ) -> ParseResult<'src, ()> {
     let token = lexer.peek_token();
     match token.kind {
         TokenKind::Keyword if token.source == "var" => {
             lexer.next_token();
             let token = expect(lexer, TokenKind::Identifier, None::<&str>)?;
-            let ty = parse_type(lexer)?;
+            let ty = parse_type(lexer, typedefs)?;
             let id = if inspect(lexer, &[TokenKind::Assign])? {
                 lexer.next_token();
                 let rhs = parse_expr(
@@ -222,6 +301,7 @@ fn parse_stmt<'src>(
                     names_index,
                     Precedence::Lowest,
                     &[TokenKind::SemiColon],
+                    typedefs,
                 )?;
                 let var_id = VarId(curr_fn.vars.len());
                 curr_fn.body.push(Stmt::AssignVar {
@@ -251,6 +331,7 @@ fn parse_stmt<'src>(
                     names_index,
                     Precedence::Lowest,
                     &[TokenKind::SemiColon],
+                    typedefs,
                 )?;
                 Some(expr)
             };
@@ -272,6 +353,7 @@ fn parse_stmt<'src>(
                 names_index,
                 Precedence::Lowest,
                 &[TokenKind::CloseParen],
+                typedefs,
             )?;
             expect(lexer, TokenKind::CloseParen, None::<&str>)?;
             let after_block = next_block(curr_fn)?;
@@ -279,7 +361,7 @@ fn parse_stmt<'src>(
             curr_fn.body.push(Stmt::JZ(cond, after_block));
 
             names_index.push_scope();
-            parse_stmt(lexer, curr_fn, names_index)?;
+            parse_stmt(lexer, curr_fn, names_index, typedefs)?;
             names_index.pop_scope();
 
             if lexer.peek_token().source == "else" {
@@ -290,7 +372,7 @@ fn parse_stmt<'src>(
                 lexer.next_token();
 
                 names_index.push_scope();
-                parse_stmt(lexer, curr_fn, names_index)?;
+                parse_stmt(lexer, curr_fn, names_index, typedefs)?;
                 names_index.pop_scope();
 
                 curr_fn.body.push(Stmt::Block(after_else_block));
@@ -313,13 +395,14 @@ fn parse_stmt<'src>(
                 names_index,
                 Precedence::Lowest,
                 &[TokenKind::CloseParen],
+                typedefs,
             )?;
             expect(lexer, TokenKind::CloseParen, None::<&str>)?;
 
             curr_fn.body.push(Stmt::JZ(cond, after_block));
 
             names_index.push_scope();
-            parse_stmt(lexer, curr_fn, names_index)?;
+            parse_stmt(lexer, curr_fn, names_index, typedefs)?;
             names_index.pop_scope();
 
             curr_fn.body.push(Stmt::Jmp(cond_block));
@@ -341,7 +424,7 @@ fn parse_stmt<'src>(
                         break;
                     }
                     _ => {
-                        parse_stmt(lexer, curr_fn, names_index)?;
+                        parse_stmt(lexer, curr_fn, names_index, typedefs)?;
                     }
                 }
             }
@@ -359,6 +442,7 @@ fn parse_stmt<'src>(
                     TokenKind::SemiColon,
                     TokenKind::OpenParen,
                 ],
+                typedefs,
             )?;
 
             let ptoken = lexer.peek_token();
@@ -371,6 +455,7 @@ fn parse_stmt<'src>(
                         names_index,
                         Precedence::Lowest,
                         &[TokenKind::SemiColon],
+                        typedefs,
                     )?;
                     expect(
                         lexer,
@@ -390,6 +475,7 @@ fn parse_stmt<'src>(
                         names_index,
                         Precedence::Lowest,
                         &[TokenKind::SemiColon],
+                        typedefs,
                     )?;
                     expect(
                         lexer,
@@ -403,7 +489,7 @@ fn parse_stmt<'src>(
                 }
                 (Expr::Global(token), TokenKind::OpenParen) => {
                     lexer.next_token();
-                    let mut args = collect_args(lexer, curr_fn, names_index)?;
+                    let mut args = collect_args(lexer, curr_fn, names_index, typedefs)?;
                     expect(
                         lexer,
                         TokenKind::SemiColon,
@@ -432,6 +518,7 @@ fn parse_expr<'src>(
     names_index: &NameSpace,
     precedence: Precedence,
     stop: &[TokenKind],
+    typedefs: &TypeDefIndex<'src>,
 ) -> ParseResult<'src, Expr<'src>> {
     let mut curr_precedence = precedence;
     let left_token = lexer.next_token();
@@ -452,6 +539,7 @@ fn parse_expr<'src>(
                 names_index,
                 precedence,
                 &[TokenKind::CloseParen],
+                typedefs,
             )?;
             expect(lexer, TokenKind::CloseParen, Some("Expected `)`."))?;
             expr
@@ -459,9 +547,9 @@ fn parse_expr<'src>(
         TokenKind::Keyword if left_token.source == "cast" => {
             curr_precedence = Precedence::Highest;
             expect(lexer, TokenKind::OpenParen, None::<&str>)?;
-            let ty = parse_type(lexer)?;
+            let ty = parse_type(lexer, typedefs)?;
             expect(lexer, TokenKind::CloseParen, None::<&str>)?;
-            let expr = parse_expr(lexer, curr_fn, names_index, precedence, stop)?;
+            let expr = parse_expr(lexer, curr_fn, names_index, precedence, stop, typedefs)?;
             Expr::Cast(left_token.loc, ty, Box::new(expr))
         }
         TokenKind::Identifier => {
@@ -474,7 +562,7 @@ fn parse_expr<'src>(
         }
         TokenKind::Ampersand => {
             curr_precedence = Precedence::RefDeref;
-            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop)?;
+            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, typedefs)?;
             match operand {
                 Expr::Var(token, var_id) => Expr::Ref(token, var_id),
                 _ => todo!(),
@@ -482,7 +570,7 @@ fn parse_expr<'src>(
         }
         TokenKind::Asterisk => {
             curr_precedence = Precedence::RefDeref;
-            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop)?;
+            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, typedefs)?;
             match operand {
                 Expr::Ref(token, var_id) => Expr::Deref(token, var_id),
                 Expr::Var(token, var_id) => Expr::Deref(token, var_id),
@@ -498,7 +586,7 @@ fn parse_expr<'src>(
             (Expr::Global(token), TokenKind::OpenParen) => {
                 lexer.next_token();
                 curr_precedence = Precedence::Call;
-                let mut args = collect_args(lexer, curr_fn, names_index)?;
+                let mut args = collect_args(lexer, curr_fn, names_index, typedefs)?;
                 let id = VarId(curr_fn.vars.len());
                 curr_fn.vars.push(Var::new(*token));
                 curr_fn.body.push(Stmt::Funcall {
@@ -520,7 +608,7 @@ fn parse_expr<'src>(
             return unexpected_token(token, Some("Expected `;`."));
         };
         left = {
-            let right = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop)?;
+            let right = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, typedefs)?;
 
             let id = get_new_var_id(curr_fn, left_token);
 
@@ -540,6 +628,7 @@ fn collect_args<'src>(
     lexer: &mut PeekableLexer<'src>,
     curr_fn: &mut Func<'src>,
     names_index: &NameSpace,
+    typedefs: &TypeDefIndex<'src>,
 ) -> Result<Vec<Expr<'src>>, ParserError<'src>> {
     let mut args = vec![];
     loop {
@@ -560,6 +649,7 @@ fn collect_args<'src>(
             names_index,
             Precedence::Lowest,
             &[TokenKind::Comma, TokenKind::CloseParen],
+            typedefs,
         )?;
         args.push(arg);
     }

@@ -7,6 +7,7 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct Program<'src> {
+    pub typedefs: Vec<TypeDef<'src>>,
     pub externs: Vec<Extern<'src>>,
     pub funcs: Vec<Func<'src>>,
 }
@@ -131,6 +132,36 @@ pub struct Func<'src> {
     pub body: Vec<Stmt<'src>>,
 }
 
+#[derive(Debug)]
+pub struct StructField<'src> {
+    pub name: Token<'src>,
+    pub ty: Type,
+    pub offset: usize,
+}
+
+#[derive(Debug)]
+pub struct StructDef<'src> {
+    pub name: Token<'src>,
+    pub fields: Vec<StructField<'src>>,
+    pub size: usize,
+}
+
+#[derive(Debug)]
+pub enum TypeDef<'src> {
+    Struct(StructDef<'src>),
+}
+
+impl<'src> TypeDef<'src> {
+    pub fn size(&self) -> usize {
+        match self {
+            TypeDef::Struct(struct_def) => struct_def.size,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct TypeDefIndex<'src>(pub HashMap<&'src str, usize>);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
@@ -138,13 +169,16 @@ pub enum Type {
     Bool,
     Char,
     Void,
+    TypeId(usize),
     PtrTo(Box<Self>),
 }
+
 impl Type {
-    pub fn deref_as_inner_type(&self) -> Type {
+    pub fn size(&self, p: &[TypeDef<'_>]) -> usize {
         match self {
-            Self::PtrTo(ty) => *ty.to_owned(),
-            other => other.clone(),
+            Self::TypeId(id) => p[*id].size(),
+            Type::Void => todo!("Cannot get size of void"),
+            _ => 8,
         }
     }
 }
@@ -157,6 +191,7 @@ impl<'src> std::fmt::Display for Type {
             Self::Bool => write!(f, "bool"),
             Self::Char => write!(f, "char"),
             Self::Void => write!(f, "void"),
+            Self::TypeId(id) => write!(f, "struct {id}"),
             Self::PtrTo(ty) => write!(f, "*{ty}"),
         }
     }

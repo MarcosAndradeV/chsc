@@ -20,15 +20,15 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
 
     for func in ast.funcs {
         let mut f = Function::new(m.link_with_c, func.name.source);
-        generate_func(func, &mut f, &mut m);
+        generate_func(func, &ast.typedefs, &mut f, &mut m);
 
         m.push_function(f);
     }
     Ok(m)
 }
 
-fn generate_func(func: Func<'_>, f: &mut Function, m: &mut Module) -> Result<(), AppError> {
-    let (size, offsets) = calculate_stack_offsets(&func.vars);
+fn generate_func(func: Func<'_>, p: &Vec<TypeDef<'_>>, f: &mut Function, m: &mut Module) -> Result<(), AppError> {
+    let (size, offsets) = calculate_stack_offsets(&func.vars, p);
     f.allocate_stack(size);
     f.push_block("b");
 
@@ -310,12 +310,12 @@ impl std::fmt::Display for UinitValue {
     }
 }
 
-fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
+fn calculate_stack_offsets(vars: &[Var<'_>], p: &Vec<TypeDef<'_>>) -> (usize, Vec<usize>) {
     let mut offsets = vec![0; vars.len()];
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
-        offset += 8;
+        offset += var.ty.as_ref().unwrap_or(&Type::Ptr).size(p);
         offsets[i] = offset;
     }
-    (vars.len() * 8, offsets)
+    (offset, offsets)
 }
