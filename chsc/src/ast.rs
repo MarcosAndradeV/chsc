@@ -7,117 +7,38 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct Program<'src> {
-    pub typedefs: Vec<TypeDef<'src>>,
-    pub externs: Vec<Extern<'src>>,
+    pub externs: Vec<ExternFunc<'src>>,
     pub funcs: Vec<Func<'src>>,
 }
 
 #[derive(Debug)]
 pub enum Names {
-    Global,
+    ExternFunc(usize),
+    Func(usize),
     Var(VarId),
 }
 
 #[derive(Debug, Default)]
 pub struct NameSpace<'src>(pub Vec<HashMap<&'src str, Names>>);
-impl<'src> NameSpace<'src> {
-    pub fn push_scope(&mut self) {
-        self.0.push(HashMap::new());
-    }
-
-    pub fn pop_scope(&mut self) {
-        assert!(self.0.len() != 1);
-        self.0.pop();
-    }
-
-    pub fn insert_var_index(&mut self, k: &'src str, v: Names) -> Option<Names> {
-        self.0.last_mut().and_then(|scope| scope.insert(k, v))
-    }
-
-    pub fn get_var_index(&self, k: &'src str) -> Option<&Names> {
-        for scope in self.0.iter().rev() {
-            let v = scope.get(k);
-            if v.is_some() {
-                return v;
-            }
-        }
-        None
-    }
-}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockId(pub usize);
-impl std::fmt::Display for BlockId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 #[derive(Debug, Default, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VarId(pub usize);
 
 #[derive(Debug)]
-pub enum Extern<'src> {
-    Func {
-        name: Token<'src>,
-        args: Vec<Type>,
-        is_variadic: bool,
-        ret: Option<Type>,
-    },
-    Var(Var<'src>),
-}
-impl<'src> Extern<'src> {
-    pub fn name(&self) -> &'src str {
-        match self {
-            Extern::Func { name, .. } => name.source,
-            Extern::Var(var) => var.token.source,
-        }
-    }
-
-    pub fn as_func_(&self) -> (&Token<'src>, &Vec<Type>, bool, &Option<Type>) {
-        match self {
-            Extern::Func {
-                name,
-                args,
-                is_variadic,
-                ret,
-            } => (name, args, *is_variadic, ret),
-            _ => todo!(),
-        }
-    }
+pub struct ExternFunc<'src> {
+    pub name: Token<'src>,
+    pub args: Vec<Type>,
+    pub is_variadic: bool,
+    pub ret: Type,
 }
 
 #[derive(Debug)]
 pub struct Var<'src> {
     pub token: Token<'src>,
-    pub ty: Option<Type>,
-    // pub used: bool,
-}
-
-impl<'src> Var<'src> {
-    pub fn new(token: Token<'src>) -> Self {
-        Self {
-            token,
-            ty: None,
-            // used: false,
-        }
-    }
-
-    pub fn r#type(self, ty: Type) -> Self {
-        Self {
-            token: self.token,
-            ty: Some(ty),
-            // used: true,
-        }
-    }
-
-    pub fn used(self) -> Self {
-        Self {
-            token: self.token,
-            ty: self.ty,
-            // used: true,
-        }
-    }
+    pub ty: Type,
 }
 
 #[derive(Debug, Default)]
@@ -125,76 +46,22 @@ pub struct Func<'src> {
     pub name: Token<'src>,
     pub args: Vec<Token<'src>>,
     pub args_types: Vec<Type>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Type,
 
     pub vars: Vec<Var<'src>>,
     pub block_count: usize,
     pub body: Vec<Stmt<'src>>,
 }
 
-#[derive(Debug)]
-pub struct StructField<'src> {
-    pub name: Token<'src>,
-    pub ty: Type,
-    pub offset: usize,
-}
-
-#[derive(Debug)]
-pub struct StructDef<'src> {
-    pub name: Token<'src>,
-    pub fields: Vec<StructField<'src>>,
-    pub size: usize,
-}
-
-#[derive(Debug)]
-pub enum TypeDef<'src> {
-    Struct(StructDef<'src>),
-}
-
-impl<'src> TypeDef<'src> {
-    pub fn size(&self) -> usize {
-        match self {
-            TypeDef::Struct(struct_def) => struct_def.size,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct TypeDefIndex<'src>(pub HashMap<&'src str, usize>);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Type {
+    #[default]
+    Void,
     Int,
     Ptr,
     Bool,
     Char,
-    Void,
-    TypeId(usize),
     PtrTo(Box<Self>),
-}
-
-impl Type {
-    pub fn size(&self, p: &[TypeDef<'_>]) -> usize {
-        match self {
-            Self::TypeId(id) => p[*id].size(),
-            Type::Void => todo!("Cannot get size of void"),
-            _ => 8,
-        }
-    }
-}
-
-impl<'src> std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Int => write!(f, "int"),
-            Self::Ptr => write!(f, "ptr"),
-            Self::Bool => write!(f, "bool"),
-            Self::Char => write!(f, "char"),
-            Self::Void => write!(f, "void"),
-            Self::TypeId(id) => write!(f, "struct {id}"),
-            Self::PtrTo(ty) => write!(f, "*{ty}"),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -247,6 +114,43 @@ pub enum Expr<'src> {
     Cast(Loc<'src>, Type, Box<Self>),
 }
 
+impl std::fmt::Display for BlockId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<'src> NameSpace<'src> {
+    pub fn push_scope(&mut self) {
+        self.0.push(HashMap::new());
+    }
+
+    pub fn pop_scope(&mut self) {
+        assert!(self.0.len() != 1);
+        self.0.pop();
+    }
+
+    pub fn insert_var_index(&mut self, k: &'src str, v: Names) -> Option<Names> {
+        self.0.last_mut().and_then(|scope| scope.insert(k, v))
+    }
+
+    pub fn get_var_index(&self, k: &'src str) -> Option<&Names> {
+        for scope in self.0.iter().rev() {
+            let v = scope.get(k);
+            if v.is_some() {
+                return v;
+            }
+        }
+        None
+    }
+}
+
+impl<'src> Var<'src> {
+    pub fn new(token: Token<'src>, ty: Type) -> Self {
+        Self { token, ty }
+    }
+}
+
 impl<'src> Expr<'src> {
     pub fn loc(&self) -> Loc<'src> {
         match self {
@@ -271,6 +175,30 @@ impl<'src> std::fmt::Display for Expr<'src> {
             Expr::Deref(_, VarId(id)) => write!(f, "Deref({})", id),
             Expr::Ref(_, VarId(id)) => write!(f, "Ref({})", id),
             Expr::Cast(_, ty, e) => write!(f, "cast({ty}){e}"),
+        }
+    }
+}
+
+impl Type {
+    pub fn size(&self) -> usize {
+        match self {
+            Type::Void => todo!("Cannot get size of void"),
+            Type::Char => 1,
+            Type::Bool => 4,
+            _ => 8,
+        }
+    }
+}
+
+impl<'src> std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int => write!(f, "int"),
+            Self::Ptr => write!(f, "ptr"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
+            Self::Void => write!(f, "void"),
+            Self::PtrTo(ty) => write!(f, "*{ty}"),
         }
     }
 }
@@ -331,33 +259,25 @@ use crate::*;
 
 pub fn print_program(program: &Program) {
     for ext in &program.externs {
-        match ext {
-            Extern::Func {
-                name,
-                args,
-                is_variadic,
-                ret,
-            } => {
-                print!("extern fn {}(", name);
-                for (i, arg) in args.iter().enumerate() {
-                    print!("{}", arg);
-                    if i < args.len() - 1 {
-                        print!(", ");
-                    }
-                }
-                if *is_variadic {
-                    print!(", ...");
-                }
-                print!(")");
-                if let Some(ret) = ret {
-                    print!("-> {}", ret);
-                }
-                println!(";");
-            }
-            Extern::Var(var) => {
-                println!("extern var: {}{:?}", var.token, var.ty);
+        let ExternFunc {
+            name,
+            args,
+            is_variadic,
+            ret,
+        } = &ext;
+        print!("extern fn {}(", name);
+        for (i, arg) in args.iter().enumerate() {
+            print!("{}", arg);
+            if i < args.len() - 1 {
+                print!(", ");
             }
         }
+        if *is_variadic {
+            print!(", ...");
+        }
+        print!(")");
+        print!("-> {}", ret);
+        println!(";");
     }
 
     for func in &program.funcs {
@@ -386,7 +306,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
     print!("    ");
     match stmt {
         Stmt::Store { target, rhs } => {
-            println!("Var({})^ = {};", target.1.0, rhs);
+            println!("Store({}) = {};", target.1.0, rhs);
         }
         Stmt::AssignVar { var, rhs } => {
             println!("Var({}) = {};", var.1.0, rhs);

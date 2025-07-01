@@ -12,23 +12,24 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
     let mut m = Module::new(use_c);
 
     for r#extern in ast.externs {
-        match r#extern {
-            Extern::Func{name, ..} => m.push_extrn(name.source),
-            Extern::Var(var) => todo!(),
-        }
+        m.push_extrn(r#extern.name.source);
     }
 
     for func in ast.funcs {
         let mut f = Function::new(m.link_with_c, func.name.source);
-        generate_func(func, &ast.typedefs, &mut f, &mut m);
+        generate_func(func, &mut f, &mut m);
 
         m.push_function(f);
     }
     Ok(m)
 }
 
-fn generate_func(func: Func<'_>, p: &Vec<TypeDef<'_>>, f: &mut Function, m: &mut Module) -> Result<(), AppError> {
-    let (size, offsets) = calculate_stack_offsets(&func.vars, p);
+fn generate_func(
+    func: Func<'_>,
+    f: &mut Function,
+    m: &mut Module,
+) -> Result<(), AppError> {
+    let (size, offsets) = calculate_stack_offsets(&func.vars);
     f.allocate_stack(size);
     f.push_block("b");
 
@@ -84,7 +85,23 @@ fn generate_func(func: Func<'_>, p: &Vec<TypeDef<'_>>, f: &mut Function, m: &mut
                 let offset = offsets[id];
                 f.push_raw_instr(format!("mov [rbp-{offset}], {r}"));
             }
-            Stmt::Unop { .. } => todo!(),
+            Stmt::Unop { result, operator, operand  } => {
+                let mut l = UinitValue::new(Value::from(Register::Rax));
+                generate_expr(m, f, &offsets, operand, &mut l)?;
+
+                match operator.kind {
+                    TokenKind::Bang => {
+                        f.push_raw_instr("xor rdx, rdx");
+                        f.push_raw_instr(format!("test {l}, {l}"));
+                        f.push_instr(Instr::Set(Cond::Z, Value::Register(Register::Bl)));
+                        l.init(Value::from(Register::Rbx));
+                    }
+                    _ => todo!(),
+                }
+
+                let offset = offsets[result.0];
+                f.push_raw_instr(format!("mov [rbp-{offset}], {l}"));
+            }
             Stmt::Binop {
                 result,
                 operator,
@@ -283,7 +300,6 @@ fn generate_expr(
         Expr::Cast(_, _, expr) => {
             generate_expr(m, f, offsets, *expr, dst)?;
         }
-        _ => todo!("Expression: {expr}"),
     }
     Ok(())
 }
@@ -310,12 +326,12 @@ impl std::fmt::Display for UinitValue {
     }
 }
 
-fn calculate_stack_offsets(vars: &[Var<'_>], p: &Vec<TypeDef<'_>>) -> (usize, Vec<usize>) {
+fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offsets = vec![0; vars.len()];
-    let mut offset = 0usize;
+    let mut offset = 8usize;
     for (i, var) in vars.iter().enumerate() {
-        offset += var.ty.as_ref().unwrap_or(&Type::Ptr).size(p);
         offsets[i] = offset;
+        offset += var.ty.size();
     }
     (offset, offsets)
 }

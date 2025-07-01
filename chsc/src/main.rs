@@ -10,18 +10,15 @@ use crate::ast::*;
 use crate::chslexer::*;
 
 use crate::generator::generate;
-use crate::opt::*;
-use crate::typechecker::type_check_program;
 use crate::utils::*;
 
 mod ast;
 mod chslexer;
 mod fasm_backend;
-mod opt;
+
+mod generator;
 mod parser;
 mod utils;
-mod generator;
-mod typechecker;
 
 fn main() {
     match app() {
@@ -45,13 +42,6 @@ fn app() -> Result<(), AppError> {
 
     let mut program_ast =
         parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
-
-    // const_fold(&mut program_ast);
-    // for func in &mut program_ast.funcs {
-    //     mark_used_variables(func);
-    // }
-
-    type_check_program(&mut program_ast).map_err(|e| AppError::ParseError(format!("{}", e)))?;
 
     if debug_ast {
         print_program(&program_ast);
