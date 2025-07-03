@@ -229,9 +229,6 @@ fn parse_stmt<'src>(
         TokenKind::Keyword if token.source == "return" => {
             let token = lexer.next_token();
             let expr = if inspect(lexer, &[TokenKind::SemiColon])? {
-                if curr_fn.ret_type != Type::Void {
-                    todo!();
-                }
                 None
             } else {
                 let expr = parse_expr(
@@ -243,9 +240,6 @@ fn parse_stmt<'src>(
                     p,
                 )?;
                 let ty = type_of_expr(&expr, &curr_fn.vars)?;
-                if curr_fn.ret_type != ty {
-                    todo!();
-                }
                 Some(expr)
             };
             expect(
@@ -681,20 +675,6 @@ fn expect<'src>(
         return Ok(token);
     }
     unexpected_token(token, msg)
-}
-
-fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, AppError> {
-    match expr {
-        Expr::Void(..) => Ok(Type::Void),
-        Expr::IntLit(..) => Ok(Type::Int),
-        Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
-        Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
-        Expr::Global(token) => todo!(),
-        Expr::Deref(token, var_id) => todo!(),
-        Expr::Ref(token, var_id) => Ok(Type::PtrTo(Box::new(vars[var_id.0].ty.clone()))),
-        Expr::Cast(loc, ty, expr) => Ok(ty.clone()),
-        Expr::Index { loc, base, index } => todo!(),
-    }
 }
 
 fn get_type_of_binop<'src>(lhs: Type, op: &Token<'src>, rhs: Type) -> Result<Type, AppError> {

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    chslexer::{Token, TokenKind},
-};
+use crate::chslexer::{Token, TokenKind};
 
 #[derive(Debug, Default)]
 pub struct Program<'src> {
@@ -122,6 +120,23 @@ pub enum Expr<'src> {
         base: Box<Self>,
         index: Box<Self>,
     },
+}
+
+pub fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, AppError> {
+    match expr {
+        Expr::Void(..) => Ok(Type::Void),
+        Expr::IntLit(..) => Ok(Type::Int),
+        Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
+        Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
+        Expr::Global(token) => todo!(),
+        Expr::Deref(token, var_id) => match &vars[var_id.0].ty {
+            Type::PtrTo(t) => Ok(t.as_ref().to_owned()),
+            _ => todo!(),
+        },
+        Expr::Ref(token, var_id) => Ok(Type::PtrTo(Box::new(vars[var_id.0].ty.clone()))),
+        Expr::Cast(loc, ty, expr) => Ok(ty.clone()),
+        Expr::Index { loc, base, index } => todo!(),
+    }
 }
 
 impl std::fmt::Display for BlockId {

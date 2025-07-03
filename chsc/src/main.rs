@@ -15,7 +15,7 @@ use crate::utils::*;
 mod ast;
 mod chslexer;
 mod fasm_backend;
-
+mod typechecker;
 mod generator;
 mod parser;
 mod utils;
@@ -41,12 +41,14 @@ fn app() -> Result<(), AppError> {
     })?;
 
     let mut program_ast =
-        parser::parse(&file_path, &source).map_err(|e| AppError::ParseError(format!("{}", e)))?;
+        parser::parse(&file_path, &source)?;
 
     if debug_ast {
         print_program(&program_ast);
         return Ok(());
     }
+
+    typechecker::check_program(&program_ast)?;
 
     let asm_code = generate(program_ast, use_c)?;
 
