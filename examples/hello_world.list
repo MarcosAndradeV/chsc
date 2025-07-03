@@ -1,0 +1,2 @@
+cargo run -q --bin chsc -- -r --use-c examples/hello_world.chs
+rm examples/hello_world examples/hello_world.o examples/hello_world.asm

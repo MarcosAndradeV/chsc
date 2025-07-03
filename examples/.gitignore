@@ -1,4 +1,6 @@
 *
 !*/
 !**/*.chs
+!**/*.list
+!**/*.bi
 !.gitignore

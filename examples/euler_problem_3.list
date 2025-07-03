@@ -1,0 +1,2 @@
+cargo run -q --bin chsc -- -r --use-c examples/euler_problem_3.chs
+rm examples/euler_problem_3 examples/euler_problem_3.o examples/euler_problem_3.asm
