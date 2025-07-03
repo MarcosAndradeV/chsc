@@ -36,15 +36,7 @@ pub fn parse<'src>(
     lexer.set_is_keyword_fn(|s| {
         matches!(
             s,
-            "extern"
-                | "fn"
-                | "return"
-                | "var"
-                | "if"
-                | "else"
-                | "while"
-                | "syscall"
-                | "cast"
+            "extern" | "fn" | "return" | "var" | "if" | "else" | "while" | "syscall" | "cast"
         )
     });
     let mut p = Program::default();
@@ -198,9 +190,7 @@ fn parse_fn<'src>(
     Ok(func)
 }
 
-fn parse_type<'src>(
-    lexer: &mut PeekableLexer<'src>,
-) -> ParseResult<'src, Type> {
+fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> {
     let token = lexer.next_token();
     match token.kind {
         TokenKind::Identifier => match token.source {
@@ -213,6 +203,16 @@ fn parse_type<'src>(
         TokenKind::Asterisk => {
             let ty = parse_type(lexer)?;
             Ok(Type::PtrTo(Box::new(ty)))
+        }
+        TokenKind::OpenBracket => {
+            let size = expect(lexer, TokenKind::IntegerNumber, Some("Expected a number"))?;
+            expect(
+                lexer,
+                TokenKind::CloseBracket,
+                Some("Array types are like this [SIZE]TYPE"),
+            )?;
+            let ty = parse_type(lexer)?;
+            Ok(Type::Array(size.source.parse().unwrap(), Box::new(ty)))
         }
         _ => unexpected_token(token, Some("Expected type")),
     }
@@ -260,6 +260,9 @@ fn parse_stmt<'src>(
         TokenKind::Keyword if token.source == "return" => {
             let token = lexer.next_token();
             let expr = if inspect(lexer, &[TokenKind::SemiColon])? {
+                if curr_fn.ret_type != Type::Void {
+                    todo!();
+                }
                 None
             } else {
                 let expr = parse_expr(
@@ -270,6 +273,10 @@ fn parse_stmt<'src>(
                     &[TokenKind::SemiColon],
                     p,
                 )?;
+                let ty = type_of_expr(&expr, &curr_fn.vars)?;
+                if curr_fn.ret_type != ty {
+                    todo!();
+                }
                 Some(expr)
             };
             expect(
@@ -379,7 +386,6 @@ fn parse_stmt<'src>(
                     TokenKind::SemiColon,
                     TokenKind::OpenParen,
                 ],
-
                 p,
             )?;
 
@@ -393,7 +399,6 @@ fn parse_stmt<'src>(
                         names_index,
                         Precedence::Lowest,
                         &[TokenKind::SemiColon],
-
                         p,
                     )?;
                     expect(
@@ -422,7 +427,7 @@ fn parse_stmt<'src>(
                         Some("Expected `;` after expression."),
                     )?;
                     curr_fn.body.push(Stmt::Store {
-                        target: (token, id),
+                        target: Expr::Deref(token, id),
                         rhs,
                     });
                 }
@@ -489,26 +494,12 @@ fn parse_expr<'src>(
             expect(lexer, TokenKind::OpenParen, None::<&str>)?;
             let ty = parse_type(lexer)?;
             expect(lexer, TokenKind::CloseParen, None::<&str>)?;
-            let expr = parse_expr(
-                lexer,
-                curr_fn,
-                names_index,
-                precedence,
-                stop,
-                p,
-            )?;
+            let expr = parse_expr(lexer, curr_fn, names_index, precedence, stop, p)?;
             Expr::Cast(left_token.loc, ty, Box::new(expr))
         }
         TokenKind::Bang => {
             curr_precedence = Precedence::NegNot;
-            let expr = parse_expr(
-                lexer,
-                curr_fn,
-                names_index,
-                precedence,
-                stop,
-                p,
-            )?;
+            let expr = parse_expr(lexer, curr_fn, names_index, precedence, stop, p)?;
             let ty = type_of_expr(&expr, &curr_fn.vars)?;
             if ty != Type::Bool {
                 todo!()
@@ -529,6 +520,9 @@ fn parse_expr<'src>(
         TokenKind::Identifier => {
             curr_precedence = Precedence::Highest;
             match names_index.get_var_index(left_token.source) {
+                Some(Names::Var(id)) if matches!(curr_fn.vars[id.0].ty, Type::Array(..)) => {
+                    Expr::Ref(left_token, *id)
+                }
                 Some(Names::Var(id)) => Expr::Var(left_token, *id),
                 Some(Names::ExternFunc(_) | Names::Func(_)) => Expr::Global(left_token),
                 _ => undefined(left_token)?,
@@ -536,14 +530,7 @@ fn parse_expr<'src>(
         }
         TokenKind::Ampersand => {
             curr_precedence = Precedence::RefDeref;
-            let operand = parse_expr(
-                lexer,
-                curr_fn,
-                names_index,
-                curr_precedence,
-                stop,
-                p,
-            )?;
+            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, p)?;
             match operand {
                 Expr::Var(token, var_id) => Expr::Ref(token, var_id),
                 _ => todo!(),
@@ -551,14 +538,7 @@ fn parse_expr<'src>(
         }
         TokenKind::Asterisk => {
             curr_precedence = Precedence::RefDeref;
-            let operand = parse_expr(
-                lexer,
-                curr_fn,
-                names_index,
-                curr_precedence,
-                stop,
-                p,
-            )?;
+            let operand = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, p)?;
             match operand {
                 Expr::Ref(token, var_id) => Expr::Var(token, var_id),
                 Expr::Var(token, var_id) => Expr::Deref(token, var_id),
@@ -607,14 +587,7 @@ fn parse_expr<'src>(
             return unexpected_token(token, Some("Expected `;`."));
         };
         left = {
-            let right = parse_expr(
-                lexer,
-                curr_fn,
-                names_index,
-                curr_precedence,
-                stop,
-                p,
-            )?;
+            let right = parse_expr(lexer, curr_fn, names_index, curr_precedence, stop, p)?;
             let left_ty = type_of_expr(&left, &curr_fn.vars)?;
             let right_ty = type_of_expr(&right, &curr_fn.vars)?;
             let ty = get_type_of_binop(left_ty, &token, right_ty)?;
@@ -725,18 +698,16 @@ fn expect<'src>(
     ));
 }
 
-fn type_of_expr<'src>(
-    expr: &Expr<'src>,
-    vars: &Vec<Var<'src>>,
-) -> Result<Type, ParserError<'src>> {
+fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, ParserError<'src>> {
     match expr {
         Expr::IntLit(..) => Ok(Type::Int),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
         Expr::Global(token) => todo!(),
         Expr::Deref(token, var_id) => todo!(),
-        Expr::Ref(token, var_id) => todo!(),
+        Expr::Ref(token, var_id) => Ok(Type::PtrTo(Box::new(vars[var_id.0].ty.clone()))),
         Expr::Cast(loc, ty, expr) => Ok(ty.clone()),
+        Expr::Index { loc, base, index } => todo!(),
     }
 }
 

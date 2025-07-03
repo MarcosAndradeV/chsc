@@ -44,12 +44,19 @@ impl SizeOperator {
         match (self, reg) {
             (SizeOperator::Qword, reg) if reg.is_64() => reg,
             (SizeOperator::Byte, reg) if reg.is_8() => reg,
+
             (SizeOperator::Qword, Register::Al) => Register::Rax,
             (SizeOperator::Qword, Register::Bl) => Register::Rbx,
             (SizeOperator::Qword, Register::Cl) => Register::Rcx,
             (SizeOperator::Qword, Register::Dl) => Register::Rdx,
             (SizeOperator::Qword, Register::R12L) => Register::R12,
             (SizeOperator::Qword, Register::R13L) => Register::R13,
+
+            (SizeOperator::Dword, Register::Rax|Register::Al) => Register::Eax,
+            (SizeOperator::Dword, Register::Rbx|Register::Bl) => Register::Ebx,
+            (SizeOperator::Dword, Register::Rdi|Register::Dil) => Register::Edi,
+            (SizeOperator::Dword, Register::Rsi|Register::Sil) => Register::Esi,
+
             (SizeOperator::Byte, Register::Rax) => Register::Al,
             (SizeOperator::Byte, Register::Rbx) => Register::Bl,
             (SizeOperator::Byte, Register::Rdx) => Register::Dl,
@@ -113,6 +120,10 @@ pub enum Register {
     R12L,
     R13L,
     R14L,
+    Eax,
+    Ebx,
+    Edi,
+    Esi,
 }
 
 impl fmt::Display for Register {
@@ -144,6 +155,10 @@ impl fmt::Display for Register {
             R12L => write!(f, "r12l"),
             R13L => write!(f, "r13l"),
             R14L => write!(f, "r14l"),
+            Eax => write!(f, "eax"),
+            Ebx => write!(f, "ebx"),
+            Edi => write!(f, "edi"),
+            Esi => write!(f, "esi"),
         }
     }
 }
@@ -445,7 +460,9 @@ pub enum Instr {
     Add(Value, Value),
     Sub(Value, Value),
     Mul(Value),
+    IMul(Value),
     Div(Value),
+    IDiv(Value),
 
     And(Value, Value),
     Or(Value, Value),
@@ -453,6 +470,7 @@ pub enum Instr {
 
     Cmp(Value, Value),
     Cmov(Cond, Value, Value),
+    Cqo,
 
     Test(Value, Value),
     Set(Cond, Value),
@@ -482,12 +500,15 @@ impl fmt::Display for Instr {
             Self::Add(dst, src) => write!(f, "add {dst}, {src}"),
             Self::Sub(dst, src) => write!(f, "sub {dst}, {src}"),
             Self::Mul(src) => write!(f, "mul {src}"),
+            Self::IMul(src) => write!(f, "imul {src}"),
             Self::Div(src) => write!(f, "div {src}"),
+            Self::IDiv(src) => write!(f, "idiv {src}"),
             Self::And(dst, src) => write!(f, "and {dst}, {src}"),
             Self::Or(dst, src) => write!(f, "or {dst}, {src}"),
             Self::Xor(dst, src) => write!(f, "xor {dst}, {src}"),
             Self::Cmp(dst, src) => write!(f, "cmp {dst}, {src}"),
             Self::Cmov(cond, dst, src) => write!(f, "cmov{cond} {dst}, {src}"),
+            Self::Cqo => write!(f, "cqo"),
             Self::Test(dst, src) => write!(f, "test {dst}, {src}"),
             Self::Set(cond, dst) => write!(f, "set{cond} {dst}"),
             Instr::J(cond, label) => write!(f, "j{cond} .{label}"), // local labels

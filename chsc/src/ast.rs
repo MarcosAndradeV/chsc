@@ -57,17 +57,21 @@ pub struct Func<'src> {
 pub enum Type {
     #[default]
     Void,
+
     Int,
-    Ptr,
     Bool,
     Char,
+
+    Ptr,
     PtrTo(Box<Self>),
+
+    Array(usize, Box<Self>),
 }
 
 #[derive(Debug)]
 pub enum Stmt<'src> {
     Store {
-        target: (Token<'src>, VarId),
+        target: Expr<'src>,
         rhs: Expr<'src>,
     },
     AssignVar {
@@ -112,6 +116,12 @@ pub enum Expr<'src> {
     Ref(Token<'src>, VarId),
 
     Cast(Loc<'src>, Type, Box<Self>),
+
+    Index {
+        loc: Loc<'src>,
+        base: Box<Self>,
+        index: Box<Self>,
+    },
 }
 
 impl std::fmt::Display for BlockId {
@@ -161,6 +171,7 @@ impl<'src> Expr<'src> {
             Expr::Deref(token, _) => token.loc,
             Expr::Ref(token, _) => token.loc,
             Expr::Cast(loc, ..) => *loc,
+            Expr::Index { loc, .. } => *loc,
         }
     }
 }
@@ -170,11 +181,12 @@ impl<'src> std::fmt::Display for Expr<'src> {
         match self {
             Expr::IntLit(_, lit) => write!(f, "{lit}"),
             Expr::StrLit(_) => write!(f, "@str"),
-            Expr::Var(_, VarId(id)) => write!(f, "Var({})", id),
+            Expr::Var(_, VarId(id)) => write!(f, "Var({id})"),
             Expr::Global(token) => write!(f, "{token}"),
-            Expr::Deref(_, VarId(id)) => write!(f, "Deref({})", id),
-            Expr::Ref(_, VarId(id)) => write!(f, "Ref({})", id),
-            Expr::Cast(_, ty, e) => write!(f, "cast({ty}){e}"),
+            Expr::Deref(_, VarId(id)) => write!(f, "Deref({id})"),
+            Expr::Ref(_, VarId(id)) => write!(f, "Ref({id})"),
+            Expr::Cast(_, ty, e) => write!(f, "Cast({ty}){e}"),
+            Expr::Index { loc, base, index } => write!(f, "Index({base})[{index}]"),
         }
     }
 }
@@ -183,9 +195,18 @@ impl Type {
     pub fn size(&self) -> usize {
         match self {
             Type::Void => todo!("Cannot get size of void"),
+            Type::Array(size, ty) => ty.size() * size,
             Type::Char => 1,
             Type::Bool => 4,
+            Type::Int => 4,
             _ => 8,
+        }
+    }
+    pub fn get_inner(&self) -> &Self {
+        match self {
+            Type::Array(_, ty) => ty.as_ref(),
+            Type::PtrTo(ty) => ty.as_ref(),
+            _ => self,
         }
     }
 }
@@ -199,6 +220,7 @@ impl<'src> std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Void => write!(f, "void"),
             Self::PtrTo(ty) => write!(f, "*{ty}"),
+            Self::Array(size, ty) => write!(f, "[{size}]{ty}"),
         }
     }
 }
@@ -306,7 +328,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
     print!("    ");
     match stmt {
         Stmt::Store { target, rhs } => {
-            println!("Store({}) = {};", target.1.0, rhs);
+            println!("Store({}) = {};", target, rhs);
         }
         Stmt::AssignVar { var, rhs } => {
             println!("Var({}) = {};", var.1.0, rhs);

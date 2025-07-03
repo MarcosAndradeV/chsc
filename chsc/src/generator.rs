@@ -24,11 +24,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
     Ok(m)
 }
 
-fn generate_func(
-    func: Func<'_>,
-    f: &mut Function,
-    m: &mut Module,
-) -> Result<(), AppError> {
+fn generate_func(func: Func<'_>, f: &mut Function, m: &mut Module) -> Result<(), AppError> {
     let (size, offsets) = calculate_stack_offsets(&func.vars);
     f.allocate_stack(size);
     f.push_block("b");
@@ -57,7 +53,7 @@ fn generate_func(
             Stmt::Return(loc, expr) => {
                 if let Some(expr) = expr {
                     let mut val = UinitValue::new(Value::from(Register::Rax));
-                    generate_expr(m, f, &offsets, expr, &mut val)?;
+                    generate_expr(m, f, &offsets, &func.vars, expr, &mut val)?;
                 }
                 f.push_raw_instr(format!(";; Return@{loc}"));
                 f.push_raw_instr("mov rsp, rbp");
@@ -65,29 +61,35 @@ fn generate_func(
                 f.push_raw_instr("ret");
             }
             Stmt::Store {
-                target: (token, VarId(id)),
+                target: Expr::Deref(token, VarId(id)),
                 rhs,
             } => {
                 let mut r = UinitValue::new(Value::from(Register::Rax));
-                generate_expr(m, f, &offsets, rhs, &mut r)?;
+                generate_expr(m, f, &offsets, &func.vars, rhs, &mut r)?;
                 f.push_raw_instr(format!(";; Store@{loc}", loc = token.loc));
                 let offset = offsets[id];
+                let s = size_of_type(func.vars[id].ty.get_inner());
+                let out = s.register_for_size(Register::Rax);
                 f.push_raw_instr(format!("mov rbx, [rbp-{offset}]"));
-                f.push_raw_instr(format!("mov [rbx], {r}"));
+                f.push_raw_instr(format!("mov {s} [rbx], {out}"));
             }
             Stmt::AssignVar {
                 var: (token, VarId(id)),
                 rhs,
             } => {
                 let mut r = UinitValue::new(Value::from(Register::Rax));
-                generate_expr(m, f, &offsets, rhs, &mut r)?;
+                generate_expr(m, f, &offsets, &func.vars, rhs, &mut r)?;
                 f.push_raw_instr(format!(";; AssignVar@{loc}", loc = token.loc));
                 let offset = offsets[id];
                 f.push_raw_instr(format!("mov [rbp-{offset}], {r}"));
             }
-            Stmt::Unop { result, operator, operand  } => {
+            Stmt::Unop {
+                result,
+                operator,
+                operand,
+            } => {
                 let mut l = UinitValue::new(Value::from(Register::Rax));
-                generate_expr(m, f, &offsets, operand, &mut l)?;
+                generate_expr(m, f, &offsets, &func.vars, operand, &mut l)?;
 
                 match operator.kind {
                     TokenKind::Bang => {
@@ -109,9 +111,9 @@ fn generate_func(
                 rhs,
             } => {
                 let mut l = UinitValue::new(Value::from(Register::Rax));
-                generate_expr(m, f, &offsets, lhs, &mut l)?;
+                generate_expr(m, f, &offsets, &func.vars, lhs, &mut l)?;
                 let mut r = UinitValue::new(Value::from(Register::Rbx));
-                generate_expr(m, f, &offsets, rhs, &mut r)?;
+                generate_expr(m, f, &offsets, &func.vars, rhs, &mut r)?;
 
                 match operator.kind {
                     TokenKind::Plus => {
@@ -192,7 +194,7 @@ fn generate_func(
                 let regs = call_convention.into_iter();
                 for (expr, reg) in args.into_iter().zip(regs).rev() {
                     let mut dst = UinitValue::new(Value::from(reg));
-                    generate_expr(m, f, &offsets, expr, &mut dst)?;
+                    generate_expr(m, f, &offsets, &func.vars, expr, &mut dst)?;
                 }
 
                 // x86_64 Linux ABI passes the amount of floating point args via al.
@@ -210,13 +212,14 @@ fn generate_func(
             }
             Stmt::JZ(cond, id) => {
                 let mut val = UinitValue::new(Value::from(Register::Rax));
-                generate_expr(m, f, &offsets, cond, &mut val)?;
+                generate_expr(m, f, &offsets, &func.vars, cond, &mut val)?;
                 f.push_raw_instr("test rax, rax");
                 f.push_raw_instr(format!("jz .b{id}"));
             }
             Stmt::Jmp(id) => {
                 f.push_raw_instr(format!("jmp .b{id}"));
             }
+            _ => todo!(),
         }
     }
     Ok(())
@@ -226,6 +229,7 @@ fn generate_expr(
     m: &mut Module,
     f: &mut Function,
     offsets: &Vec<usize>,
+    vars: &[Var<'_>],
     expr: Expr<'_>,
     dst: &mut UinitValue,
 ) -> Result<(), AppError> {
@@ -280,10 +284,12 @@ fn generate_expr(
         Expr::Deref(token, VarId(id)) => {
             f.push_raw_instr(format!(";; Deref({id})@{loc}", loc = token.loc));
             match dst {
-                UinitValue(Some(val)) if val.is_register() => {
+                UinitValue(Some(Value::Register(reg))) => {
                     let offset = offsets[id];
-                    f.push_raw_instr(format!("mov {val}, [rbp-{offset}]"));
-                    f.push_raw_instr(format!("mov {val}, [{val}]"));
+                    let s = size_of_type(vars[id].ty.get_inner());
+                    let out = s.register_for_size(*reg);
+                    f.push_raw_instr(format!("mov {reg}, [rbp-{offset}]"));
+                    f.push_raw_instr(format!("mov {out}, {s} [{reg}]"));
                 }
                 _ => todo!(),
             }
@@ -298,8 +304,9 @@ fn generate_expr(
             }
         }
         Expr::Cast(_, _, expr) => {
-            generate_expr(m, f, offsets, *expr, dst)?;
+            generate_expr(m, f, offsets, vars, *expr, dst)?;
         }
+        _ => todo!(),
     }
     Ok(())
 }
@@ -328,10 +335,23 @@ impl std::fmt::Display for UinitValue {
 
 fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offsets = vec![0; vars.len()];
-    let mut offset = 8usize;
+    let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
+        let size = var.ty.size();
+        offset += if size <= 8 { 8 } else { size };
         offsets[i] = offset;
-        offset += var.ty.size();
     }
     (offset, offsets)
+}
+
+fn size_of_type(ty: &Type) -> SizeOperator {
+    match ty {
+        Type::Char => SizeOperator::Byte,
+        // Type::Int16 => SizeOperator::Word,
+        Type::Int => SizeOperator::Dword,
+        Type::Ptr => SizeOperator::Qword,
+        Type::Array(_, inner) => size_of_type(inner.as_ref()),
+        Type::PtrTo(inner) => size_of_type(inner.as_ref()),
+        _ => todo!(),
+    }
 }
