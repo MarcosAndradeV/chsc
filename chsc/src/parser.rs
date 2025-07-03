@@ -1,37 +1,6 @@
-use crate::{ast::*, chslexer::*};
+use crate::{ast::*, chslexer::*, utils::AppError};
 
-#[derive(Debug)]
-pub enum ParserError<'src> {
-    UnexpectedEOF(Loc<'src>),
-    UnexpectedToken(Token<'src>, Option<String>),
-    Undefined(Token<'src>),
-}
-
-impl std::fmt::Display for ParserError<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParserError::UnexpectedEOF(loc) => write!(f, "{}: Unexpected end of file", loc),
-            ParserError::UnexpectedToken(token, None) => {
-                write!(f, "{}: Unexpected token {}", token.loc, token)
-            }
-            ParserError::UnexpectedToken(token, Some(msg)) => {
-                write!(f, "{}: Unexpected token {}, {}", token.loc, token, msg)
-            }
-            ParserError::Undefined(token) => {
-                write!(f, "{}: Undefined name {}", token.loc, token)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParserError<'_> {}
-
-pub type ParseResult<'src, T> = Result<T, ParserError<'src>>;
-
-pub fn parse<'src>(
-    file_path: &'src str,
-    source: &'src str,
-) -> Result<Program<'src>, ParserError<'src>> {
+pub fn parse<'src>(file_path: &'src str, source: &'src str) -> Result<Program<'src>, AppError> {
     let mut lexer = PeekableLexer::new(file_path, source);
     lexer.set_is_keyword_fn(|s| {
         matches!(
@@ -71,7 +40,7 @@ fn parse_extern<'src>(
     lexer: &mut PeekableLexer<'src>,
     vars_index: &mut NameSpace<'src>,
     p: &Program<'src>,
-) -> ParseResult<'src, ExternFunc<'src>> {
+) -> Result<ExternFunc<'src>, AppError> {
     let token = lexer.next_token();
 
     match token.kind {
@@ -130,7 +99,7 @@ fn parse_fn<'src>(
     lexer: &mut PeekableLexer<'src>,
     names_index: &mut NameSpace<'src>,
     p: &Program<'src>,
-) -> ParseResult<'src, Func<'src>> {
+) -> Result<Func<'src>, AppError> {
     let name = expect(lexer, TokenKind::Identifier, None::<&str>)?;
     names_index.insert_var_index(name.source, Names::Func(p.funcs.len()));
     names_index.push_scope();
@@ -190,7 +159,7 @@ fn parse_fn<'src>(
     Ok(func)
 }
 
-fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> ParseResult<'src, Type> {
+fn parse_type<'src>(lexer: &mut PeekableLexer<'src>) -> Result<Type, AppError> {
     let token = lexer.next_token();
     match token.kind {
         TokenKind::Identifier => match token.source {
@@ -223,7 +192,7 @@ fn parse_stmt<'src>(
     curr_fn: &mut Func<'src>,
     names_index: &mut NameSpace<'src>,
     p: &Program<'src>,
-) -> ParseResult<'src, ()> {
+) -> Result<(), AppError> {
     let token = lexer.peek_token();
     match token.kind {
         TokenKind::Keyword if token.source == "var" => {
@@ -300,7 +269,7 @@ fn parse_stmt<'src>(
                 p,
             )?;
             expect(lexer, TokenKind::CloseParen, None::<&str>)?;
-            let after_block = next_block(curr_fn)?;
+            let after_block = next_block(curr_fn);
 
             curr_fn.body.push(Stmt::JZ(cond, after_block));
 
@@ -309,7 +278,7 @@ fn parse_stmt<'src>(
             names_index.pop_scope();
 
             if lexer.peek_token().source == "else" {
-                let after_else_block = next_block(curr_fn)?;
+                let after_else_block = next_block(curr_fn);
                 curr_fn.body.push(Stmt::Jmp(after_else_block));
 
                 curr_fn.body.push(Stmt::Block(after_block));
@@ -330,8 +299,8 @@ fn parse_stmt<'src>(
             lexer.next_token();
 
             expect(lexer, TokenKind::OpenParen, None::<&str>)?;
-            let cond_block = next_block(curr_fn)?;
-            let after_block = next_block(curr_fn)?;
+            let cond_block = next_block(curr_fn);
+            let after_block = next_block(curr_fn);
             curr_fn.body.push(Stmt::Block(cond_block));
             let cond = parse_expr(
                 lexer,
@@ -464,7 +433,7 @@ fn parse_expr<'src>(
     stop: &[TokenKind],
 
     p: &Program<'src>,
-) -> ParseResult<'src, Expr<'src>> {
+) -> Result<Expr<'src>, AppError> {
     let mut curr_precedence = precedence;
     let left_token = lexer.next_token();
     let mut left = match left_token.kind {
@@ -567,6 +536,7 @@ fn parse_expr<'src>(
                     left = Expr::Var(token, id);
                     Some(id)
                 } else {
+                    left = Expr::Void(token.loc);
                     None
                 };
                 curr_fn.body.push(Stmt::Funcall {
@@ -615,7 +585,7 @@ fn collect_args<'src>(
     curr_fn: &mut Func<'src>,
     names_index: &NameSpace,
     p: &Program<'src>,
-) -> Result<Vec<Expr<'src>>, ParserError<'src>> {
+) -> Result<Vec<Expr<'src>>, AppError> {
     let mut args = vec![];
     loop {
         let ptoken = lexer.peek_token();
@@ -642,64 +612,80 @@ fn collect_args<'src>(
     Ok(args)
 }
 
-fn next_block<'src>(curr_fn: &mut Func<'src>) -> ParseResult<'src, BlockId> {
+fn next_block<'src>(curr_fn: &mut Func<'src>) -> BlockId {
     curr_fn.block_count += 1;
     let id = BlockId(curr_fn.block_count);
-    Ok(id)
+    id
 }
 
 fn next_token_is<'src>(
     lexer: &mut PeekableLexer<'src>,
     kind: &[TokenKind],
-) -> ParseResult<'src, bool> {
+) -> Result<bool, AppError> {
     let token = lexer.peek_token();
     if token.is_eof() {
-        return Err(ParserError::UnexpectedEOF(token.loc));
+        unexpected_end_of_file(token)?;
     }
     Ok(kind.contains(&token.kind))
 }
 
-fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T, ParserError<'_>> {
-    Err(ParserError::UnexpectedToken(
-        token,
-        msg.map(|m| m.to_string()),
-    ))
+fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T, AppError> {
+    if let Some(msg) = msg {
+        Err(AppError::ParseError(format!(
+            "{}: Unexpected token {}, {}",
+            token.loc,
+            token,
+            msg.to_string()
+        )))
+    } else {
+        Err(AppError::ParseError(format!(
+            "{}: Unexpected token {}",
+            token.loc, token
+        )))
+    }
 }
 
-fn undefined<T>(token: Token<'_>) -> Result<T, ParserError<'_>> {
-    Err(ParserError::Undefined(token))
+fn undefined<T>(token: Token<'_>) -> Result<T, AppError> {
+    Err(AppError::ParseError(format!(
+        "{}: Undefined name {}",
+        token.loc, token
+    )))
 }
 
 fn inspect<'src>(
     lexer: &mut PeekableLexer<'src>,
     kinds: &[TokenKind],
     // msg: Option<impl ToString>,
-) -> ParseResult<'src, bool> {
+) -> Result<bool, AppError> {
     let token = lexer.peek_token();
     if token.is_eof() {
-        let token = lexer.peek_token();
-        return Err(ParserError::UnexpectedEOF(token.loc));
+        unexpected_end_of_file(token)?;
     }
     Ok(kinds.contains(&token.kind))
+}
+
+fn unexpected_end_of_file(token: &Token<'_>) -> Result<bool, AppError> {
+    Err(AppError::ParseError(format!(
+        "{}: Unexpected end of file",
+        token.loc
+    )))
 }
 
 fn expect<'src>(
     lexer: &mut PeekableLexer<'src>,
     kind: TokenKind,
     msg: Option<impl ToString>,
-) -> ParseResult<'src, Token<'src>> {
+) -> Result<Token<'src>, AppError> {
     let token = lexer.next_token();
     if token.kind == kind {
         return Ok(token);
     }
-    return Err(ParserError::UnexpectedToken(
-        token,
-        msg.map(|m| m.to_string()),
-    ));
+    unexpected_token(token, msg)
 }
 
-fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, ParserError<'src>> {
+fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, AppError> {
     match expr {
+        Expr::Void(..) => Ok(Type::Void),
         Expr::IntLit(..) => Ok(Type::Int),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
@@ -711,11 +697,7 @@ fn type_of_expr<'src>(expr: &Expr<'src>, vars: &Vec<Var<'src>>) -> Result<Type, 
     }
 }
 
-fn get_type_of_binop<'src>(
-    lhs: Type,
-    op: &Token<'src>,
-    rhs: Type,
-) -> Result<Type, ParserError<'src>> {
+fn get_type_of_binop<'src>(lhs: Type, op: &Token<'src>, rhs: Type) -> Result<Type, AppError> {
     use TokenKind::*;
     match op.kind {
         Eq | NotEq | Gt | GtEq | Lt | LtEq => {
