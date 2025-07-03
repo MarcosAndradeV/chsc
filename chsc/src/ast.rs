@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::{
     chslexer::{Token, TokenKind},
-    parser::ParseResult,
 };
 
 #[derive(Debug, Default)]
@@ -106,6 +105,7 @@ pub enum Stmt<'src> {
 
 #[derive(Debug)]
 pub enum Expr<'src> {
+    Void(Loc<'src>),
     IntLit(Loc<'src>, u64),
     StrLit(Token<'src>),
 
@@ -164,6 +164,7 @@ impl<'src> Var<'src> {
 impl<'src> Expr<'src> {
     pub fn loc(&self) -> Loc<'src> {
         match self {
+            Expr::Void(loc) => *loc,
             Expr::IntLit(loc, _) => *loc,
             Expr::StrLit(token) => token.loc,
             Expr::Var(token, _) => token.loc,
@@ -179,6 +180,7 @@ impl<'src> Expr<'src> {
 impl<'src> std::fmt::Display for Expr<'src> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Expr::Void(_) => write!(f, "void"),
             Expr::IntLit(_, lit) => write!(f, "{lit}"),
             Expr::StrLit(_) => write!(f, "@str"),
             Expr::Var(_, VarId(id)) => write!(f, "Var({id})"),

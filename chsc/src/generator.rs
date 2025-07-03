@@ -306,6 +306,7 @@ fn generate_expr(
         Expr::Cast(_, _, expr) => {
             generate_expr(m, f, offsets, vars, *expr, dst)?;
         }
+        Expr::Void(_) => {}
         _ => todo!(),
     }
     Ok(())
