@@ -6,18 +6,24 @@ use fasm_backend::{
     Cond, DataDef, DataDirective, DataExpr, Function, Instr, Module, Register, Value,
 };
 
-use crate::ast::*;
 use crate::chslexer::*;
+use crate::compiler::compile_ast_to_ir;
+use crate::ir::*;
 
 use crate::generator::generate;
+use crate::parser_ir::parse_program;
+use crate::typechecker::check_program;
 use crate::utils::*;
 
 mod ast;
 mod chslexer;
 mod fasm_backend;
-mod typechecker;
 mod generator;
+mod ir;
 mod parser;
+mod parser_ir;
+mod compiler;
+mod typechecker;
 mod utils;
 
 fn main() {
@@ -40,17 +46,18 @@ fn app() -> Result<(), AppError> {
         error: e,
     })?;
 
-    let mut program_ast =
-        parser::parse(&file_path, &source)?;
+    let mut program_ast = parser::parse_module(&file_path, &source)?;
+
+    let mut program_ir = compile_ast_to_ir(program_ast)?;
 
     if debug_ast {
-        print_program(&program_ast);
+        print_program(&program_ir);
         return Ok(());
     }
 
-    typechecker::check_program(&program_ast)?;
+    // check_program(&program_ir)?;
 
-    let asm_code = generate(program_ast, use_c)?;
+    let asm_code = generate(program_ir, use_c)?;
 
     let (asm_path, o_path, exe_path) = generate_output_paths(&file_path)?;
 

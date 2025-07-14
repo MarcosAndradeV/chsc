@@ -44,8 +44,9 @@ impl SizeOperator {
         match (self, reg) {
             (SizeOperator::Qword, reg) if reg.is_64() => reg,
             (SizeOperator::Byte, reg) if reg.is_8() => reg,
+            (SizeOperator::Dword, reg) if reg.is_32() => reg,
 
-            (SizeOperator::Qword, Register::Al) => Register::Rax,
+            (SizeOperator::Qword, Register::Al|Register::Eax) => Register::Rax,
             (SizeOperator::Qword, Register::Bl) => Register::Rbx,
             (SizeOperator::Qword, Register::Cl) => Register::Rcx,
             (SizeOperator::Qword, Register::Dl) => Register::Rdx,
@@ -54,10 +55,12 @@ impl SizeOperator {
 
             (SizeOperator::Dword, Register::Rax|Register::Al) => Register::Eax,
             (SizeOperator::Dword, Register::Rbx|Register::Bl) => Register::Ebx,
+            (SizeOperator::Dword, Register::Rdx|Register::Dl) => Register::Edx,
+
             (SizeOperator::Dword, Register::Rdi|Register::Dil) => Register::Edi,
             (SizeOperator::Dword, Register::Rsi|Register::Sil) => Register::Esi,
 
-            (SizeOperator::Byte, Register::Rax) => Register::Al,
+            (SizeOperator::Byte, Register::Rax|Register::Eax) => Register::Al,
             (SizeOperator::Byte, Register::Rbx) => Register::Bl,
             (SizeOperator::Byte, Register::Rdx) => Register::Dl,
             (SizeOperator::Byte, Register::Rcx) => Register::Cl,
@@ -122,6 +125,7 @@ pub enum Register {
     R14L,
     Eax,
     Ebx,
+    Edx,
     Edi,
     Esi,
 }
@@ -159,6 +163,7 @@ impl fmt::Display for Register {
             Ebx => write!(f, "ebx"),
             Edi => write!(f, "edi"),
             Esi => write!(f, "esi"),
+            Edx => write!(f, "edx"),
         }
     }
 }
@@ -199,9 +204,20 @@ impl Register {
                 | R15
         )
     }
-    pub fn is_8(&self) -> bool {
+
+    fn is_8(&self) -> bool {
         use Register::*;
         matches!(self, Al | Bl | Cl | Dl | Sil | Dil | R12L)
+    }
+
+    fn is_32(self) -> bool {
+        use Register::*;
+        matches!(self,
+            Eax|
+            Ebx|
+            Edi|
+            Esi
+        )
     }
 }
 

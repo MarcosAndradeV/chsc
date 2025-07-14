@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{type_of_expr, Expr, Program, Stmt, Type, VarId},
     chslexer::Token,
+    ir::{Expr, Program, Stmt, Type, VarId, type_of_expr},
     utils::AppError,
 };
 
@@ -71,16 +71,29 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
         }
         for stmt in func.body.iter() {
             match stmt {
-                Stmt::AssignVar {
-                    var: (token, VarId(id)),
+                Stmt::AssignGlobalVar {
+                    var: (token, uid),
                     rhs,
                 } => {
-                    let ty = &func.vars[*id].ty;
-                    let rhs_ty = type_of_expr(rhs, &func.vars)?;
+                    let ty = &p.global_vars[*uid].ty;
+                    let rhs_ty = type_of_expr(rhs, &p.global_vars, &func.vars)?;
                     if *ty != rhs_ty {
                         Err(AppError::TypeError(format!(
                             "{loc}: Cannot assign a value of type `{rhs_ty}` to a variable of type `{ty}`.",
                             loc = token.loc
+                        )))?;
+                    }
+                }
+                Stmt::AssignVar {
+                    loc,
+                    var: VarId(id),
+                    rhs,
+                } => {
+                    let ty = &func.vars[*id].ty;
+                    let rhs_ty = type_of_expr(rhs, &p.global_vars, &func.vars)?;
+                    if *ty != rhs_ty {
+                        Err(AppError::TypeError(format!(
+                            "{loc}: Cannot assign a value of type `{rhs_ty}` to a variable of type `{ty}`.",
                         )))?;
                     }
                 }
@@ -95,7 +108,7 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
                     }
                 }
                 Stmt::Return(loc, Some(expr)) => {
-                    let ty = type_of_expr(expr, &func.vars)?;
+                    let ty = type_of_expr(expr, &p.global_vars, &func.vars)?;
                     if ty != func.ret_type {
                         Err(AppError::TypeError(format!(
                             "{loc}: Function `{name}` cannot return `{ty}`. It must return `{ret}`.",
@@ -104,11 +117,16 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
                             ret = func.ret_type,
                         )))?;
                     }
+                    return_flow.combine_mut(ReturnFlow::Always);
                 }
                 Stmt::Store { target, rhs } => {
-                    assert!(matches!(target, Expr::Deref(..)));
-                    let rhs_ty = type_of_expr(rhs, &func.vars)?;
-                    let ty = type_of_expr(target, &func.vars)?;
+                    match target {
+                        Expr::Deref(..) => (),
+                        Expr::GlobalDeref(..) => (),
+                        _ => unreachable!(),
+                    }
+                    let rhs_ty = type_of_expr(rhs, &p.global_vars, &func.vars)?;
+                    let ty = type_of_expr(target, &p.global_vars, &func.vars)?;
                     if ty != rhs_ty {
                         Err(AppError::TypeError(format!(
                             "{loc}: Cannot store value of type `{rhs_ty}` in a pointer to `{ty}`.",
@@ -152,7 +170,7 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
                         (std::cmp::Ordering::Equal, _) | (std::cmp::Ordering::Greater, true) => (),
                     }
                     for (i, (arg, expect_ty)) in args.iter().zip(ty_args.iter()).enumerate() {
-                        let actual_ty = type_of_expr(arg, &func.vars)?;
+                        let actual_ty = type_of_expr(arg, &p.global_vars, &func.vars)?;
                         if actual_ty != *expect_ty {
                             Err(AppError::TypeError(format!(
                                 "{loc}: The argument {i} of call has type `{actual_ty}`, but `{expect_ty}` is expected.",
@@ -162,8 +180,8 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
                     }
                 }
                 Stmt::Syscall { result, args } => todo!(),
-                Stmt::JZ(cond, block_id) => {
-                    let cond_ty = type_of_expr(cond, &func.vars)?;
+                Stmt::JZ(cond, block_id)|Stmt::JNZ(cond, block_id) => {
+                    let cond_ty = type_of_expr(cond, &p.global_vars, &func.vars)?;
                     if cond_ty != Type::Bool {
                         Err(AppError::TypeError(format!(
                             "{loc}: Condition expected to be boolean, but is `{cond_ty}`",
@@ -174,6 +192,14 @@ pub fn check_program(p: &Program) -> Result<(), AppError> {
                 Stmt::Jmp(block_id) => (),
                 Stmt::Block(block_id) => (),
             }
+        }
+        if return_flow != ReturnFlow::Always {
+            Err(AppError::TypeError(format!(
+                "{loc}: Function `{name}` must return `{ret}`.",
+                loc = func.name.loc,
+                name = func.name,
+                ret = func.ret_type,
+            )))?;
         }
     }
     Ok(())

@@ -258,16 +258,7 @@ pub fn parse_args() -> Result<(String, Vec<String>, bool, bool, bool), AppError>
                 debug_ast = true;
             }
             "-h" | "--help" => {
-                println!("Usage: chsc [OPTIONS] <input>");
-                println!("Options:");
-                println!("  -r, --run     Run the executable after compilation");
-                println!();
-                println!("  --use-c       Use C compiler for linking");
-                println!("  -C <flag>     Pass flag to C compiler");
-                println!("  -C<flag>      Pass flag to C compiler (no space)");
-                println!();
-                println!("  -h, --help    Show this help message");
-                std::process::exit(0);
+                usage();
             }
             arg if arg.starts_with("-") => {
                 return Err(AppError::ArgumentError(format!("Unknown option: {}", arg)));
@@ -288,6 +279,19 @@ pub fn parse_args() -> Result<(String, Vec<String>, bool, bool, bool), AppError>
         .ok_or_else(|| AppError::ArgumentError("Usage: chsc [OPTIONS] <input>".to_string()))?;
 
     Ok((file_path, compiler_flags, run, use_c, debug_ast))
+}
+
+fn usage() {
+    println!("Usage: chsc [OPTIONS] <input>");
+    println!("Options:");
+    println!("  -r, --run     Run the executable after compilation");
+    println!();
+    println!("  --use-c       Use C compiler for linking");
+    println!("  -C <flag>     Pass flag to C compiler");
+    println!("  -C<flag>      Pass flag to C compiler (no space)");
+    println!();
+    println!("  -h, --help    Show this help message");
+    std::process::exit(0);
 }
 
 pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
@@ -335,27 +339,31 @@ pub fn generate_output_paths(file_path: &str) -> Result<(PathBuf, PathBuf, PathB
 pub fn handle_app_error(error: &AppError) {
     match error {
         AppError::Build(build_err) => handle_build_error(build_err),
-        AppError::ArgumentError(_) => {
-            eprintln!("Run with -h or --help for usage information");
+        AppError::ArgumentError(s) => {
+            eprintln!("Error: {s}");
+            eprintln!("Hint: Run with -h or --help for usage information");
         }
-        AppError::FileError { path, error } => match error.kind() {
-            std::io::ErrorKind::NotFound => {
-                eprintln!("Hint: Check that the file '{}' exists", path);
+        AppError::FileError { path, error } => {
+            eprintln!("Error: {error}");
+            match error.kind() {
+                std::io::ErrorKind::NotFound => {
+                    eprintln!("Hint: Check that the file '{}' exists", path);
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    eprintln!("Hint: Check file permissions for '{}'", path);
+                }
+                _ => {}
             }
-            std::io::ErrorKind::PermissionDenied => {
-                eprintln!("Hint: Check file permissions for '{}'", path);
-            }
-            _ => {}
-        },
+        }
         AppError::ParseError(error) => {
-            eprintln!("{}", error);
+            eprintln!("Parse Error: {}", error);
         }
         AppError::TypeError(error) => {
-            eprintln!("{}", error);
+            eprintln!("Type Error: {}", error);
         }
         AppError::GenerationError(hint, error) => {
-            eprintln!("{error}");
-            if let  Some(hint) = hint {
+            eprintln!("Generation Error: {error}");
+            if let Some(hint) = hint {
                 eprintln!("Hint: {hint}");
             }
         }
