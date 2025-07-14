@@ -17,14 +17,15 @@ use crate::utils::*;
 
 mod ast;
 mod chslexer;
+mod compiler;
 mod fasm_backend;
 mod generator;
 mod ir;
 mod parser;
 mod parser_ir;
-mod compiler;
 mod typechecker;
 mod utils;
+mod arena;
 
 fn main() {
     match app() {
@@ -46,7 +47,11 @@ fn app() -> Result<(), AppError> {
         error: e,
     })?;
 
-    let mut program_ast = parser::parse_module(&file_path, &source)?;
+    let mut strings = arena::Arena::new();
+    let file_path = strings.alloc(file_path);
+    let source = strings.alloc(source);
+
+    let mut program_ast = parser::parse_module(&strings, &file_path, &source)?;
 
     let mut program_ir = compile_ast_to_ir(program_ast)?;
 

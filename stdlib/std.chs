@@ -1,13 +1,13 @@
 module std;
 
-fn memset(p *char, byte char, size int) -> ptr {
-    var i int = 0;
-    while(i < size) {
-        *(p + i) = byte;
-        i = i + 1;
-    }
-    return p;
-}
+// fn memset(p *char, byte char, size int) -> ptr {
+//     var i int = 0;
+//     while(i < size) {
+//         *(p + i) = byte;
+//         i = i + 1;
+//     }
+//     return p;
+// }
 
 fn strlen(s *char) -> int {
     var end *char = s;

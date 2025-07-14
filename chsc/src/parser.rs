@@ -1,8 +1,10 @@
 use crate::ast::{Expr, ExternFunc, Func, Module, Name, Precedence, Stmt, Type};
-use crate::chslexer::*;
+use crate::{chslexer::*};
+use crate::arena::Arena;
 use crate::utils::AppError;
 
 pub fn parse_module<'src>(
+    arena: &'src Arena<String>,
     file_path: &'src str,
     source: &'src String,
 ) -> Result<Module<'src>, AppError> {
@@ -45,6 +47,19 @@ pub fn parse_module<'src>(
             TokenKind::Keyword if token.source == "extern" => {
                 let r#extern = parse_extern_fn(&mut lexer)?;
                 module.add_extern_fn(r#extern);
+            }
+            TokenKind::Keyword if token.source == "import" => {
+                let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
+                let file_path = arena.alloc(file_path.unescape());
+                let source = std::fs::read_to_string(&file_path).map_err(|e| AppError::FileError {
+                    path: file_path.clone(),
+                    error: e,
+                })?;
+                let source = arena.alloc(source);
+                let m = parse_module(arena, file_path, source)?;
+                module.funcs.extend(m.funcs);
+                module.externs.extend(m.externs);
+                expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
             }
             _ => unexpected_token(token, Some("Expected a top level definition"))?,
         }
