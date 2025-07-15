@@ -214,6 +214,26 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                             raw_instr!(ctx.f, "setg dl");
                             out = Register::Rdx;
                         }
+                        TokenKind::LtEq => {
+                            raw_instr!(ctx.f, "xor rdx, rdx");
+
+                            mov_to_reg(&mut ctx, lhs, l);
+                            mov_to_reg(&mut ctx, rhs, r);
+
+                            raw_instr!(ctx.f, "cmp {l}, {r}");
+                            raw_instr!(ctx.f, "setle dl");
+                            out = Register::Rdx;
+                        }
+                        TokenKind::GtEq => {
+                            raw_instr!(ctx.f, "xor rdx, rdx");
+
+                            mov_to_reg(&mut ctx, lhs, l);
+                            mov_to_reg(&mut ctx, rhs, r);
+
+                            raw_instr!(ctx.f, "cmp {l}, {r}");
+                            raw_instr!(ctx.f, "setge dl");
+                            out = Register::Rdx;
+                        }
                         _ => todo!("{operator}"),
                     }
                     raw_instr!(ctx.f, "mov [rbp-{offset}], {out}");
