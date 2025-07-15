@@ -35,14 +35,14 @@ pub struct ExternFunc<'src> {
 pub struct GlobalVar<'src> {
     pub token: Token<'src>,
     pub ty: Type,
-    pub is_vec: (bool, usize),
+    pub is_vec: Option<usize>,
 }
 
 #[derive(Debug)]
 pub struct Var<'src> {
     pub loc: Loc<'src>,
     pub ty: Type,
-    pub is_vec: (bool, usize),
+    pub is_vec: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -107,6 +107,30 @@ pub enum Stmt<'src> {
         lhs: Expr<'src>,
         rhs: Expr<'src>,
     },
+    // ArithmeticBinop {
+    //     result: VarId,
+    //     operator: Token<'src>,
+    //     lhs: Expr<'src>,
+    //     rhs: Expr<'src>,
+    // },
+    // LogicalBinop {
+    //     result: VarId,
+    //     operator: Token<'src>,
+    //     lhs: Expr<'src>,
+    //     rhs: Expr<'src>,
+    // },
+    // ComparisonBinop {
+    //     result: VarId,
+    //     operator: Token<'src>,
+    //     lhs: Expr<'src>,
+    //     rhs: Expr<'src>,
+    // },
+    // PointerArithmeticBinop {
+    //     result: VarId,
+    //     operator: Token<'src>,
+    //     lhs: Expr<'src>,
+    //     rhs: Expr<'src>,
+    // },
     Funcall {
         result: Option<VarId>,
         caller: Token<'src>,
@@ -126,6 +150,7 @@ pub enum Stmt<'src> {
 pub enum Expr<'src> {
     Void(Loc<'src>),
     IntLit(Loc<'src>, u64),
+    CharLit(Loc<'src>, char),
     StrLit(Token<'src>),
 
     Var(Loc<'src>, VarId),
@@ -145,6 +170,7 @@ pub fn type_of_expr<'src>(
     match expr {
         Expr::Void(..) => Ok(Type::Void),
         Expr::IntLit(..) => Ok(Type::Int),
+        Expr::CharLit(..) => Ok(Type::Char),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
         Expr::Global(token, uid) => Ok(global_vars[*uid].ty.clone()),
@@ -186,7 +212,7 @@ impl<'src> NameSpace<'src> {
 }
 
 impl<'src> Var<'src> {
-    pub fn new(loc: Loc<'src>, ty: Type, is_vec: (bool, usize)) -> Self {
+    pub fn new(loc: Loc<'src>, ty: Type, is_vec: Option<usize>) -> Self {
         Self { loc, ty, is_vec }
     }
 }
@@ -196,6 +222,7 @@ impl<'src> Expr<'src> {
         match self {
             Expr::Void(loc) => *loc,
             Expr::IntLit(loc, _) => *loc,
+            Expr::CharLit(loc, _) => *loc,
             Expr::StrLit(token) => token.loc,
             Expr::Var(loc, _) => *loc,
             Expr::Global(token, _) => token.loc,
@@ -211,6 +238,7 @@ impl<'src> std::fmt::Display for Expr<'src> {
         match self {
             Expr::Void(_) => write!(f, "void"),
             Expr::IntLit(_, lit) => write!(f, "{lit}"),
+            Expr::CharLit(_, lit) => write!(f, "{lit}"),
             Expr::StrLit(_) => write!(f, "@str"),
             Expr::Var(_, VarId(id)) => write!(f, "Var({id})"),
             Expr::Global(token, _) => write!(f, "{token}"),

@@ -51,13 +51,13 @@ pub fn parse_program<'src>(
                         TokenKind::CloseBracket,
                         Some("Array types are like this [SIZE]TYPE"),
                     )?;
-                    (true, size.source.parse().unwrap())
+                    Some(size.source.parse().unwrap())
                 } else {
-                    (false, 0usize)
+                    None
                 };
                 let ty = {
                     let ty = parse_type(&mut lexer)?;
-                    if is_vec.0 {
+                    if is_vec.is_some() {
                         Type::PtrTo(Box::new(ty))
                     } else {
                         ty
@@ -178,14 +178,14 @@ fn parse_fn<'src>(
                         TokenKind::CloseBracket,
                         Some("Array types are like this [SIZE]TYPE"),
                     )?;
-                    (true, size.source.parse().unwrap())
+                    Some(size.source.parse().unwrap())
                 } else {
-                    (false, 0usize)
+                    None
                 };
                 let ty = {
                     let ty = parse_type(lexer)?;
-                    if is_vec.0 {
-                        is_vec = (false, 0usize);
+                    if is_vec.is_some() {
+                        is_vec = None;
                         Type::PtrTo(Box::new(ty))
                     } else {
                         ty
@@ -258,13 +258,13 @@ fn parse_stmt<'src>(
                     TokenKind::CloseBracket,
                     Some("Array types are like this [SIZE]TYPE"),
                 )?;
-                (true, size.source.parse().unwrap())
+                Some( size.source.parse().unwrap())
             } else {
-                (false, 0usize)
+                None
             };
             let ty = {
                 let ty = parse_type(lexer)?;
-                if is_vec.0 {
+                if is_vec.is_some() {
                     Type::PtrTo(Box::new(ty))
                 } else {
                     ty
@@ -552,7 +552,7 @@ fn parse_expr<'src>(
             let ty = type_of_expr(&expr, &p.global_vars, &curr_fn.vars)?;
             let id = {
                 let len = curr_fn.vars.len();
-                curr_fn.vars.push(Var::new(left_token.loc, ty, (false, 0)));
+                curr_fn.vars.push(Var::new(left_token.loc, ty, None));
                 VarId(len)
             };
 
@@ -609,7 +609,7 @@ fn parse_expr<'src>(
                 let token = *token;
                 let id = if *ty != Type::Void {
                     let id = VarId(curr_fn.vars.len());
-                    curr_fn.vars.push(Var::new(token.loc, ty.clone(), (false, 0)));
+                    curr_fn.vars.push(Var::new(token.loc, ty.clone(), None));
                     left = Expr::Var(token.loc, id);
                     Some(id)
                 } else {
@@ -641,7 +641,7 @@ fn parse_expr<'src>(
 
             let id = {
                 let len = curr_fn.vars.len();
-                curr_fn.vars.push(Var::new(left_token.loc, ty, (false, 0)));
+                curr_fn.vars.push(Var::new(left_token.loc, ty, None));
                 VarId(len)
             };
 

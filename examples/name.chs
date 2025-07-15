@@ -1,26 +1,14 @@
+module main;
+include "stdlib/std.chs";
 
-extern fn malloc(int) -> ptr;
-extern fn memset(ptr, int, int) -> ptr;
-extern fn printf(*char, ...) -> int;
-extern fn getchar() -> char;
-
-fn read_str(buf *char, len int) -> int {
-    var i int = 0;
-    while(i < len) {
-        var c char = getchar();
-        *(buf + i) = c;
-        if(c == cast(char)10) return i;
-        i = i + 1;
-    }
-    return len;
-}
-
+var name[256] char;
 fn main() -> int {
-    var n int = 256;
-    var name *char = cast(*char)malloc(n);
-    memset(cast(ptr)name, 0, n);
-    printf("What is your name?\n");
-    n = read_str(name, n);
-    printf("Hello, %s\n", name);
+    puts("What is your name?\n");
+    var len int = read(0, name, 256);
+    if (len <= 0) {
+        puts("Could not read name\n");
+        exit(1);
+    }
+    puts("Hello "); puts(name);
     return 0;
 }

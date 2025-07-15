@@ -8,8 +8,8 @@ pub struct Module<'src> {
     // pub name_space: HashMap<&'src str, Name>,
     pub funcs: Vec<Func<'src>>,
     pub externs: Vec<ExternFunc<'src>>,
+    pub global_vars: Vec<GlobalVar<'src>>,
     // imports
-    // global_vars
 }
 
 impl<'src> Module<'src> {
@@ -21,8 +21,13 @@ impl<'src> Module<'src> {
 
     pub fn add_extern_fn(&mut self, r#extern: ExternFunc<'src>) {
         // self.name_space
-        //     .insert(r#extern.source, Name::ExternFn(self.funcs.len()));
+        //     .insert(r#extern.name.source, Name::ExternFn(self.externs.len()));
         self.externs.push(r#extern);
+    }
+    pub fn add_global_vars(&mut self, var: GlobalVar<'src>) {
+        // self.name_space
+        //     .insert(var.name.source, Name::GlobalVar(self.global_vars.len()));
+        self.global_vars.push(var);
     }
 }
 
@@ -30,6 +35,13 @@ pub enum Name {
     GlobalVar(usize),
     Func(usize),
     ExternFn(usize),
+}
+
+pub struct GlobalVar<'src> {
+    pub name: Token<'src>,
+    pub is_vec: Option<usize>,
+    pub r#type: Type<'src>,
+    pub expr: Option<Expr<'src>>,
 }
 
 pub struct ExternFunc<'src> {
@@ -64,6 +76,7 @@ pub enum Stmt<'src> {
     },
     VarDecl {
         name: Token<'src>,
+        is_vec: Option<usize>,
         r#type: Type<'src>,
         expr: Option<Expr<'src>>,
     },
@@ -91,6 +104,7 @@ pub enum Expr<'src> {
     StrLit(Token<'src>),
     Ident(Token<'src>),
     Deref(Loc<'src>, Box<Self>),
+    Ref(Loc<'src>, Box<Self>),
     Call {
         loc: Loc<'src>,
         caller: Box<Self>,
@@ -104,6 +118,11 @@ pub enum Expr<'src> {
         operator: Token<'src>,
         lhs: Box<Expr<'src>>,
         rhs: Box<Expr<'src>>,
+    },
+    Index {
+        loc: Loc<'src>,
+        base: Box<Expr<'src>>,
+        index: Box<Expr<'src>>,
     }
 }
 

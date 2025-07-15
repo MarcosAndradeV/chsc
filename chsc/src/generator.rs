@@ -33,8 +33,8 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
     }
 
     for global_var in &ast.global_vars {
-        let size = if global_var.is_vec.0 {
-            global_var.ty.size() * global_var.is_vec.1
+        let size = if let Some(sz) = global_var.is_vec {
+            global_var.ty.size() * sz
         } else {
             global_var.ty.size()
         };
@@ -329,6 +329,11 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
             raw_instr!(ctx.f, "mov {reg}, {lit}");
             Ok(())
         }
+        Expr::CharLit(loc, lit) => {
+            let lit = lit as i32;
+            raw_instr!(ctx.f, "mov {reg}, {lit}");
+            Ok(())
+        }
         Expr::Var(token, VarId(id)) => {
             let offset = ctx.get_offset(id);
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
@@ -347,7 +352,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
             Ok(())
         }
         Expr::Global(token, uid) => {
-            if ctx.global_vars[uid].is_vec.0 {
+            if ctx.global_vars[uid].is_vec.is_some() {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [_{token}]");
@@ -381,7 +386,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
         }
         Expr::GlobalDeref(token, uid) => {
             let global_var = &ctx.global_vars[uid];
-            if global_var.is_vec.0 {
+            if global_var.is_vec.is_some() {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [_{token}]");
@@ -744,8 +749,8 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
         let size = var.ty.size();
-        if var.is_vec.0 {
-            let size = size * var.is_vec.1;
+        if let Some(sz)  = var.is_vec{
+            let size = size * sz;
             offsets[i] = offset;
             offset += if size <= 8 { 8 } else { size };
         } else {
