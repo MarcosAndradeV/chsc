@@ -642,7 +642,8 @@ pub enum TokenKind {
     StringLiteral,
     CharacterLiteral,
 
-    Dot,Tilde,
+    Dot,
+    Tilde,
     Splat,
     Comma,
     Colon,

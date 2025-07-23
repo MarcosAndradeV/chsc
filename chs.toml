@@ -1,0 +1,4 @@
+[config]
+name = "temp"
+version = "0.1.0"
+run = true

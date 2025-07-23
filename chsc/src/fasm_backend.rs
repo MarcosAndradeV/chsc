@@ -46,21 +46,21 @@ impl SizeOperator {
             (SizeOperator::Byte, reg) if reg.is_8() => reg,
             (SizeOperator::Dword, reg) if reg.is_32() => reg,
 
-            (SizeOperator::Qword, Register::Al|Register::Eax) => Register::Rax,
+            (SizeOperator::Qword, Register::Al | Register::Eax) => Register::Rax,
             (SizeOperator::Qword, Register::Bl) => Register::Rbx,
             (SizeOperator::Qword, Register::Cl) => Register::Rcx,
             (SizeOperator::Qword, Register::Dl) => Register::Rdx,
             (SizeOperator::Qword, Register::R12L) => Register::R12,
             (SizeOperator::Qword, Register::R13L) => Register::R13,
 
-            (SizeOperator::Dword, Register::Rax|Register::Al) => Register::Eax,
-            (SizeOperator::Dword, Register::Rbx|Register::Bl) => Register::Ebx,
-            (SizeOperator::Dword, Register::Rdx|Register::Dl) => Register::Edx,
+            (SizeOperator::Dword, Register::Rax | Register::Al) => Register::Eax,
+            (SizeOperator::Dword, Register::Rbx | Register::Bl) => Register::Ebx,
+            (SizeOperator::Dword, Register::Rdx | Register::Dl) => Register::Edx,
 
-            (SizeOperator::Dword, Register::Rdi|Register::Dil) => Register::Edi,
-            (SizeOperator::Dword, Register::Rsi|Register::Sil) => Register::Esi,
+            (SizeOperator::Dword, Register::Rdi | Register::Dil) => Register::Edi,
+            (SizeOperator::Dword, Register::Rsi | Register::Sil) => Register::Esi,
 
-            (SizeOperator::Byte, Register::Rax|Register::Eax) => Register::Al,
+            (SizeOperator::Byte, Register::Rax | Register::Eax) => Register::Al,
             (SizeOperator::Byte, Register::Rbx) => Register::Bl,
             (SizeOperator::Byte, Register::Rdx) => Register::Dl,
             (SizeOperator::Byte, Register::Rcx) => Register::Cl,
@@ -212,12 +212,7 @@ impl Register {
 
     fn is_32(self) -> bool {
         use Register::*;
-        matches!(self,
-            Eax|
-            Ebx|
-            Edi|
-            Esi
-        )
+        matches!(self, Eax | Ebx | Edi | Esi)
     }
 }
 
@@ -676,7 +671,7 @@ pub struct Module {
     pub extrn: Vec<String>,
     pub rodata: Vec<DataDef>,
     pub data: Vec<DataDef>,
-    pub bss:  Vec<DataDef>,
+    pub bss: Vec<DataDef>,
 }
 
 impl Module {

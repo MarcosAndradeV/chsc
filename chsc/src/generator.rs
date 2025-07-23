@@ -1,10 +1,10 @@
 use crate::{
-    ir::*,
     chslexer::TokenKind,
     fasm_backend::{
         Cond, DataDef, DataDirective, DataExpr, Function, Instr, Module, Register, SizeOperator,
         Value,
     },
+    ir::*,
     utils::AppError,
 };
 
@@ -272,10 +272,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                     let call_convention = Register::get_syscall_call_convention();
 
                     if args.len() < 1 {
-                        return Err(AppError::GenerationError(
-                            None,
-                            "Syscall".to_string(),
-                        ));
+                        return Err(AppError::GenerationError(None, "Syscall".to_string()));
                     }
 
                     let args_len = args.len() - 1;
@@ -769,7 +766,7 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
         let size = var.ty.size();
-        if let Some(sz)  = var.is_vec{
+        if let Some(sz) = var.is_vec {
             let size = size * sz;
             offsets[i] = offset;
             offset += if size <= 8 { 8 } else { size };

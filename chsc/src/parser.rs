@@ -4,15 +4,14 @@ use crate::chslexer::*;
 use crate::utils::AppError;
 
 pub fn parse_module<'src>(
-    arena: &'src Arena<String>,
+    strings: &'src Arena<String>,
     file_path: &'src str,
     source: &'src String,
 ) -> Result<Module<'src>, AppError> {
     let mut lexer = PeekableLexer::new(file_path, source);
     lexer.set_is_keyword_fn(|s| {
         matches!(
-            s,
-            "module"
+            s,"module"
                 | "fn"
                 | "return"
                 | "extern"
@@ -48,6 +47,10 @@ pub fn parse_module<'src>(
             break;
         }
         match token.kind {
+            TokenKind::MacroCall if token.source == "@exec" => {
+                let stmt = parse_stmt(&mut lexer)?;
+                module.add_exec(stmt);
+            }
             TokenKind::Keyword if token.source == "fn" => {
                 let r#fn = parse_fn(&mut lexer)?;
                 module.add_fn(r#fn);
@@ -58,14 +61,14 @@ pub fn parse_module<'src>(
             }
             TokenKind::Keyword if token.source == "include" => {
                 let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
-                let file_path = arena.alloc(file_path.unescape());
+                let file_path = strings.alloc(file_path.unescape());
                 let source =
                     std::fs::read_to_string(&file_path).map_err(|e| AppError::FileError {
                         path: file_path.clone(),
                         error: e,
                     })?;
-                let source = arena.alloc(source);
-                let m = parse_module(arena, file_path, source)?;
+                let source = strings.alloc(source);
+                let m = parse_module(strings, file_path, source)?;
                 module.funcs.extend(m.funcs);
                 module.externs.extend(m.externs);
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;

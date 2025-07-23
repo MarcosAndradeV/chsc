@@ -24,7 +24,10 @@
 */
 
 use std::{
-    fs::File, io::{self, BufRead, BufReader, Write}, path::Path, process::Command
+    fs::File,
+    io::{self, BufRead, BufReader, Write},
+    path::Path,
+    process::Command,
 };
 
 fn read_blob_field(reader: &mut dyn BufRead, name: &[u8]) -> io::Result<Vec<u8>> {
@@ -125,7 +128,7 @@ struct Snapshot {
     stderr: Vec<u8>,
 }
 
-pub fn record(test_list:&Path) -> Result<(), io::Error> {
+pub fn record(test_list: &Path) -> Result<(), io::Error> {
     let shells = load_list(test_list)?;
     let snapshots = shells
         .iter()
@@ -139,12 +142,16 @@ pub fn replay(test_list: &Path) -> Result<(), io::Error> {
     let shells = load_list(&test_list)?;
     let snapshots = load_snapshots(&format!("{}.bi", test_list.display()))?;
     if shells.len() != snapshots.len() {
-        eprintln!("UNEXPECTED: Amount of shell commands in {}", test_list.display());
+        eprintln!(
+            "UNEXPECTED: Amount of shell commands in {}",
+            test_list.display()
+        );
         eprintln!("    EXPECTED: {}", snapshots.len());
         eprintln!("    ACTUAL:   {}", shells.len());
         eprintln!(
             "NOTE: You may want to do record {} to update {}.bi",
-            test_list.display(), test_list.display()
+            test_list.display(),
+            test_list.display()
         );
         return Err(io::Error::new(
             io::ErrorKind::Other,

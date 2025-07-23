@@ -3,7 +3,7 @@ use crate::chslexer::TokenKind;
 use crate::ir;
 use crate::utils::AppError;
 
-pub fn compile_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'src>, AppError> {
+pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'src>, AppError> {
     let mut p = ir::Program::default();
     let mut names_index = ir::NameSpace::default();
     names_index.push_scope();
@@ -85,14 +85,19 @@ fn compile_stmt<'src>(
             let expr = expr.map(|e| compile_expr(e, func, names_index, p));
             func.body.push(ir::Stmt::Return(loc, expr));
         }
-        ast::Stmt::VarDecl { name, is_vec, r#type, expr } => {
+        ast::Stmt::VarDecl {
+            name,
+            is_vec,
+            r#type,
+            expr,
+        } => {
             let loc = name.loc;
             let id = ir::VarId(func.vars.len());
             names_index.insert_var_index(name.source, ir::Names::Var(id));
             func.vars.push(ir::Var {
                 loc: name.loc,
                 ty: convert_types(r#type),
-                is_vec
+                is_vec,
             });
             if let Some(expr) = expr {
                 let rhs = compile_expr(expr, func, names_index, p);
@@ -165,7 +170,6 @@ fn compile_stmt<'src>(
             } else {
                 func.push_block(else_branch_id);
             }
-
         }
         ast::Stmt::Block(loc, stmts) => {
             names_index.push_scope();
@@ -193,7 +197,9 @@ fn compile_expr<'src>(
         },
         ast::Expr::Deref(loc, expr) => match compile_expr(*expr, func, &names_index, p) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
-            ir::Expr::StrLit(token) => ir::Expr::CharLit(token.loc, token.unescape().as_bytes()[0] as char),
+            ir::Expr::StrLit(token) => {
+                ir::Expr::CharLit(token.loc, token.unescape().as_bytes()[0] as char)
+            }
             _ => todo!(),
         },
         ast::Expr::Ref(loc, expr) => match compile_expr(*expr, func, &names_index, p) {
@@ -245,7 +251,7 @@ fn compile_expr<'src>(
             func.vars.push(ir::Var {
                 loc: loc,
                 ty: ir::Type::Int,
-                is_vec:None,
+                is_vec: None,
             });
 
             ir::Expr::Var(loc, id)
@@ -257,8 +263,7 @@ fn compile_expr<'src>(
             let rhs = compile_expr(*rhs, func, names_index, p);
 
             let id = ir::VarId(func.vars.len());
-            let ty =
-            match operator.kind {
+            let ty = match operator.kind {
                 TokenKind::Plus
                 | TokenKind::Minus
                 | TokenKind::Asterisk
@@ -294,8 +299,7 @@ fn compile_expr<'src>(
                     ir::Type::Bool
                 }
 
-                TokenKind::DoubleAmpersand
-                |TokenKind::DoublePipe => {
+                TokenKind::DoubleAmpersand | TokenKind::DoublePipe => {
                     // func.body.push(ir::Stmt::LogicalBinop {
                     //     result: id,
                     //     operator,
@@ -317,7 +321,7 @@ fn compile_expr<'src>(
             func.vars.push(ir::Var {
                 loc,
                 ty,
-                is_vec:None,
+                is_vec: None,
             });
             ir::Expr::Var(loc, id)
         }

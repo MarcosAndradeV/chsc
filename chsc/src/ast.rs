@@ -9,6 +9,7 @@ pub struct Module<'src> {
     pub funcs: Vec<Func<'src>>,
     pub externs: Vec<ExternFunc<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
+    pub execs: Vec<Stmt<'src>>,
     // imports
 }
 
@@ -28,6 +29,10 @@ impl<'src> Module<'src> {
         // self.name_space
         //     .insert(var.name.source, Name::GlobalVar(self.global_vars.len()));
         self.global_vars.push(var);
+    }
+
+    pub fn add_exec(&mut self, stmt: Stmt<'src>) {
+        self.execs.push(stmt);
     }
 }
 
@@ -59,12 +64,13 @@ pub struct Func<'src> {
     pub body: Vec<Stmt<'src>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Type<'src> {
     Name(Token<'src>),
     PtrTo(Box<Self>),
 }
 
+#[derive(Debug)]
 pub enum Stmt<'src> {
     Return {
         loc: Loc<'src>,
@@ -99,6 +105,7 @@ pub enum Stmt<'src> {
     Block(Loc<'src>, Vec<Self>),
 }
 
+#[derive(Debug)]
 pub enum Expr<'src> {
     IntLit(Token<'src>),
     StrLit(Token<'src>),
@@ -123,9 +130,8 @@ pub enum Expr<'src> {
         loc: Loc<'src>,
         base: Box<Expr<'src>>,
         index: Box<Expr<'src>>,
-    }
+    },
 }
-
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Precedence {

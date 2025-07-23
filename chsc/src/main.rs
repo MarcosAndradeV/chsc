@@ -1,68 +1,66 @@
 #![allow(unused)]
 
+use std::env::args;
 use std::fs;
+use std::path::PathBuf;
 
 use fasm_backend::{
     Cond, DataDef, DataDirective, DataExpr, Function, Instr, Module, Register, Value,
 };
 
 use crate::chslexer::*;
-use crate::compiler::compile_ast_to_ir;
 use crate::ir::*;
 
 use crate::generator::generate;
-use crate::parser_ir::parse_program;
-use crate::typechecker::check_program;
+use crate::lower_ast::lower_ast_to_ir;
+use crate::parser::parse_module;
 use crate::utils::*;
 
 mod ast;
 mod chslexer;
-mod compiler;
-mod fasm_backend;
 mod generator;
 mod ir;
+mod lower_ast;
 mod parser;
-mod parser_ir;
-mod typechecker;
-mod utils;
+
 mod arena;
+mod fasm_backend;
+mod utils;
 
 fn main() {
-    match app() {
-        Err(err) => {
-            handle_app_error(&err);
-        }
-        _ => (),
+    if let Err(err) = app() {
+        handle_app_error(&err);
     }
 }
 
 /// I HATE RUST
 fn app() -> Result<(), AppError> {
-    let (file_path, compiler_flags, run, use_c, debug_ast) = parse_args()?;
+    // Arena for happy borrow checker
+    let mut strings = arena::Arena::new();
 
+    let mut args = args();
+    args.next();
+
+    let Some(file_path) = args.next() else {
+        todo!()
+    };
+
+    let file_path = strings.alloc(file_path);
+
+    let config = read_config("chs.toml")?;
     validate_input_file(&file_path)?;
 
     let source = fs::read_to_string(&file_path).map_err(|e| AppError::FileError {
         path: file_path.clone(),
         error: e,
     })?;
-
-    let mut strings = arena::Arena::new();
-    let file_path = strings.alloc(file_path);
     let source = strings.alloc(source);
 
-    let mut program_ast = parser::parse_module(&strings, &file_path, &source)?;
+    let mut program_ast = parse_module(&strings, &file_path, &source)?;
 
-    let mut program_ir = compile_ast_to_ir(program_ast)?;
+    let mut program_ir = lower_ast_to_ir(program_ast)?;
 
-    if debug_ast {
-        print_program(&program_ir);
-        return Ok(());
-    }
-
-    // check_program(&program_ir)?;
-
-    let asm_code = generate(program_ir, use_c)?;
+    let asm_code = generate(program_ir, false)?;
 
     let (asm_path, o_path, exe_path) = generate_output_paths(&file_path)?;
 
@@ -73,20 +71,37 @@ fn app() -> Result<(), AppError> {
 
     println!("Generated assembly: {}", asm_path.display());
 
-    let target_path = if use_c { &o_path } else { &exe_path };
-    run_fasm(&asm_path, target_path)?;
-    println!("Assembly successful: {}", target_path.display());
+    run_fasm(&asm_path, &exe_path)?;
+    println!("Assembly successful: {}", exe_path.display());
 
-    if use_c {
-        run_cc(&o_path, &exe_path, &compiler_flags)?;
-        println!("Linking successful: {}", exe_path.display());
-    }
-
-    if run {
+    if config.run {
         println!("Running executable...");
         let output = run_exe(&exe_path.to_string_lossy().to_string())?;
         print!("{}", output);
     }
 
     Ok(())
+}
+
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct ConfigFile{config:Config}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    name: String,
+    version: String,
+    run: bool,
+}
+
+fn read_config(path: &str) -> Result<Config, AppError> {
+    let toml_str = std::fs::read_to_string(path).map_err(|e| AppError::FileError {
+        path: path.to_string(),
+        error: e,
+    })?;
+    match toml::from_str::<ConfigFile>(&toml_str) {
+        Ok(ConfigFile{config}) => Ok(config),
+        Err(e) => Err(AppError::ConfigParseError(e.to_string())),
+    }
 }

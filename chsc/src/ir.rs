@@ -57,12 +57,12 @@ pub struct Func<'src> {
     pub body: Vec<Stmt<'src>>,
 }
 impl Func<'_> {
-    pub fn push_block(&mut self, bid: usize){
+    pub fn push_block(&mut self, bid: usize) {
         self.body.push(Stmt::Block(bid));
     }
-    pub fn next_block(&mut self) -> usize{
+    pub fn next_block(&mut self) -> usize {
         let bid = self.block_count;
-        self.block_count+=1;
+        self.block_count += 1;
         bid
     }
 }

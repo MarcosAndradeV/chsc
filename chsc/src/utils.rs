@@ -197,6 +197,7 @@ pub enum AppError {
     ParseError(String),
     TypeError(String),
     GenerationError(Option<String>, String),
+    ConfigParseError(String),
 }
 
 impl Display for AppError {
@@ -207,7 +208,16 @@ impl Display for AppError {
             AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
             AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
-            AppError::GenerationError(_, msg) => write!(f, "Code generation error: {}", msg),
+            AppError::GenerationError(hint, msg) => {
+                    writeln!(f, "Generation Error: {msg}");
+                    if let Some(hint) = hint {
+                        writeln!(f, "Hint: {hint}");
+                    }
+                    Ok(())
+            }
+            AppError::ConfigParseError(msg) => {
+                write!(f, "Parse configuration file failed: {}", msg)
+            }
         }
     }
 }
@@ -218,80 +228,6 @@ impl From<BuildError> for AppError {
     fn from(err: BuildError) -> Self {
         AppError::Build(err)
     }
-}
-
-pub fn parse_args() -> Result<(String, Vec<String>, bool, bool, bool), AppError> {
-    let mut args = args();
-
-    args.next()
-        .ok_or_else(|| AppError::ArgumentError("Executable name missing".to_string()))?;
-
-    let mut compiler_flags = vec!["-no-pie".to_string()];
-    let mut run = false;
-    let mut use_c = false;
-    let mut debug_ast = false;
-    let mut file_path: Option<String> = None;
-
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-C" => {
-                let flag = args
-                    .next()
-                    .ok_or_else(|| AppError::ArgumentError("Expected flag after -C".to_string()))?;
-                compiler_flags.push(flag);
-            }
-            arg if arg.starts_with("-C") => {
-                if arg.len() <= 2 {
-                    return Err(AppError::ArgumentError(
-                        "Invalid -C flag format".to_string(),
-                    ));
-                }
-                compiler_flags.push(arg[2..].to_string());
-            }
-            "-r" | "--run" => {
-                run = true;
-            }
-            "--use-c" => {
-                use_c = true;
-            }
-            "--ast" => {
-                debug_ast = true;
-            }
-            "-h" | "--help" => {
-                usage();
-            }
-            arg if arg.starts_with("-") => {
-                return Err(AppError::ArgumentError(format!("Unknown option: {}", arg)));
-            }
-            _ => {
-                if file_path.is_some() {
-                    return Err(AppError::ArgumentError(format!(
-                        "Unexpected extra argument: {}",
-                        arg
-                    )));
-                }
-                file_path = Some(arg);
-            }
-        }
-    }
-
-    let file_path = file_path
-        .ok_or_else(|| AppError::ArgumentError("Usage: chsc [OPTIONS] <input>".to_string()))?;
-
-    Ok((file_path, compiler_flags, run, use_c, debug_ast))
-}
-
-fn usage() {
-    println!("Usage: chsc [OPTIONS] <input>");
-    println!("Options:");
-    println!("  -r, --run     Run the executable after compilation");
-    println!();
-    println!("  --use-c       Use C compiler for linking");
-    println!("  -C <flag>     Pass flag to C compiler");
-    println!("  -C<flag>      Pass flag to C compiler (no space)");
-    println!();
-    println!("  -h, --help    Show this help message");
-    std::process::exit(0);
 }
 
 pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
@@ -343,9 +279,9 @@ pub fn handle_app_error(error: &AppError) {
             eprintln!("Error: {s}");
             eprintln!("Hint: Run with -h or --help for usage information");
         }
-        AppError::FileError { path, error } => {
+        AppError::FileError { path, error:os_error } => {
             eprintln!("Error: {error}");
-            match error.kind() {
+            match os_error.kind() {
                 std::io::ErrorKind::NotFound => {
                     eprintln!("Hint: Check that the file '{}' exists", path);
                 }
@@ -355,17 +291,6 @@ pub fn handle_app_error(error: &AppError) {
                 _ => {}
             }
         }
-        AppError::ParseError(error) => {
-            eprintln!("Parse Error: {}", error);
-        }
-        AppError::TypeError(error) => {
-            eprintln!("Type Error: {}", error);
-        }
-        AppError::GenerationError(hint, error) => {
-            eprintln!("Generation Error: {error}");
-            if let Some(hint) = hint {
-                eprintln!("Hint: {hint}");
-            }
-        }
+        _ => eprintln!("{error}")
     }
 }
