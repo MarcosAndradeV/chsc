@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::{fs, process};
 
+use generator::PUTU_FN;
+
 use crate::generator::generate;
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
@@ -75,7 +77,7 @@ fn app() -> Result<(), AppError> {
     let asm_path = input_path.with_extension("asm");
     let exe_path = input_path.with_extension("");
 
-    fs::write(&asm_path, asm_code.to_string()).map_err(|e| AppError::FileError {
+    fs::write(&asm_path, format!("{asm_code}\n{PUTU_FN}")).map_err(|e| AppError::FileError {
         path: asm_path.to_string_lossy().to_string(),
         error: e,
     })?;
