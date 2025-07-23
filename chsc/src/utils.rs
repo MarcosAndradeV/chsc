@@ -1,11 +1,71 @@
-use std::error;
-use std::fmt::{self, Display};
-use std::{collections::HashMap, env::args, ffi::OsStr, fs, path::PathBuf, process::Command};
+use std::ffi::OsStr;
+use std::process::{Command, Output};
 
 pub const STDLIB_PATH: &str = "stdlib";
 
+pub fn run_fasm<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
+where
+    I: AsRef<OsStr>,
+    O: AsRef<OsStr>,
+{
+    let input_str = input_path.as_ref().to_string_lossy();
+
+    if !std::path::Path::new(&input_str.as_ref()).exists() {
+        return Err(AppError::InvalidPath {
+            path: input_str.to_string(),
+        });
+    }
+
+    let mut command = Command::new("fasm");
+    command.arg(input_path).arg(output_path);
+
+    let output = command.output().map_err(|e| AppError::ProcessError {
+        command: "fasm".to_string(),
+        error: e,
+    })?;
+
+    if !output.status.success() {
+        return Err(AppError::CompilationError {
+            command: "fasm".to_string(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::IoError(err)
+    }
+}
+
+pub fn run_exe<I>(input_path: I) -> Result<(i32, String, String), AppError>
+where
+    I: AsRef<OsStr>,
+{
+    let output: Output = Command::new(&input_path).output().map_err(|e| {
+        AppError::IoError(std::io::Error::new(
+            e.kind(),
+            format!(
+                "Failed to start process '{}': {}",
+                input_path.as_ref().to_string_lossy(),
+                e
+            ),
+        ))
+    })?;
+
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let code = output.status.code().unwrap_or(-1);
+        Ok((code, stdout, stderr))
+
+}
+
 #[derive(Debug)]
-pub enum BuildError {
+pub enum AppError {
     ProcessError {
         command: String,
         error: std::io::Error,
@@ -18,15 +78,27 @@ pub enum BuildError {
     InvalidPath {
         path: String,
     },
+    IoError(std::io::Error),
+    Utf8Error(String),
+    ExecutionFailed(i32, String, String), // (exit code, stderr)
+    ArgumentError(String),
+    FileError {
+        path: String,
+        error: std::io::Error,
+    },
+    ParseError(String),
+    TypeError(String),
+    GenerationError(Option<String>, String),
+    ConfigParseError(String),
 }
 
-impl Display for BuildError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BuildError::ProcessError { command, error } => {
+            AppError::ProcessError { command, error } => {
                 write!(f, "Failed to execute '{}': {}", command, error)
             }
-            BuildError::CompilationError {
+            AppError::CompilationError {
                 command,
                 stdout,
                 stderr,
@@ -37,183 +109,28 @@ impl Display for BuildError {
                     command, stdout, stderr
                 )
             }
-            BuildError::InvalidPath { path } => {
+            AppError::InvalidPath { path } => {
                 write!(f, "Invalid path: {}", path)
             }
-        }
-    }
-}
-
-impl std::error::Error for BuildError {}
-
-pub fn run_cc<I, O, A, F>(
-    input_path: I,
-    output_path: O,
-    compiler_flags: F,
-) -> Result<(), BuildError>
-where
-    I: AsRef<OsStr>,
-    O: AsRef<OsStr>,
-    A: AsRef<OsStr>,
-    F: IntoIterator<Item = A>,
-{
-    let input_str = input_path.as_ref().to_string_lossy();
-    let output_str = output_path.as_ref().to_string_lossy();
-
-    if !std::path::Path::new(&input_str.as_ref()).exists() {
-        return Err(BuildError::InvalidPath {
-            path: input_str.to_string(),
-        });
-    }
-
-    let mut cc_command = Command::new("cc");
-    cc_command
-        .arg("-o")
-        .arg(output_path)
-        .arg(input_path)
-        .args(compiler_flags);
-
-    let output = cc_command.output().map_err(|e| BuildError::ProcessError {
-        command: "cc".to_string(),
-        error: e,
-    })?;
-
-    if !output.status.success() {
-        return Err(BuildError::CompilationError {
-            command: "cc".to_string(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-pub fn run_fasm<I, O>(input_path: I, output_path: O) -> Result<(), BuildError>
-where
-    I: AsRef<OsStr>,
-    O: AsRef<OsStr>,
-{
-    let input_str = input_path.as_ref().to_string_lossy();
-
-    if !std::path::Path::new(&input_str.as_ref()).exists() {
-        return Err(BuildError::InvalidPath {
-            path: input_str.to_string(),
-        });
-    }
-
-    let mut command = Command::new("fasm");
-    command.arg(input_path).arg(output_path);
-
-    let output = command.output().map_err(|e| BuildError::ProcessError {
-        command: "fasm".to_string(),
-        error: e,
-    })?;
-
-    if !output.status.success() {
-        return Err(BuildError::CompilationError {
-            command: "fasm".to_string(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-pub fn run_exe<I>(input_path: I) -> Result<String, BuildError>
-where
-    I: AsRef<OsStr> + Display,
-{
-    let path_str = format!("./{}", input_path);
-    let exe_path = std::path::Path::new(&path_str);
-
-    if !exe_path.exists() {
-        return Err(BuildError::InvalidPath { path: path_str });
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = exe_path.metadata().map_err(|e| BuildError::ProcessError {
-            command: path_str.clone(),
-            error: e,
-        })?;
-        let permissions = metadata.permissions();
-        if permissions.mode() & 0o111 == 0 {
-            return Err(BuildError::InvalidPath {
-                path: format!("{} (not executable)", path_str),
-            });
-        }
-    }
-
-    let mut command = Command::new(&path_str);
-    let output = command.output().map_err(|e| BuildError::ProcessError {
-        command: path_str.clone(),
-        error: e,
-    })?;
-
-    // if !output.status.success() {
-    //     return Err(BuildError::CompilationError {
-    //         command: path_str,
-    //         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-    //         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    //     });
-    // }
-
-    Ok(format!(
-        "{stdout}\n{stderr}",
-        stdout = String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr = String::from_utf8_lossy(&output.stderr).to_string(),
-    ))
-}
-
-pub fn handle_build_error(error: &BuildError) {
-    eprintln!("Build error: {}", error);
-
-    match error {
-        BuildError::ProcessError { command, error } => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                eprintln!(
-                    "Hint: Make sure '{}' is installed and in your PATH",
-                    command
-                );
+            AppError::IoError(e) => write!(f, "IO error: {}", e),
+            AppError::Utf8Error(e) => write!(f, "UTF-8 conversion error: {}", e),
+            AppError::ExecutionFailed(code, stdout, stderr) => {
+                write!(
+                    f,
+                    "Process failed (exit code {}):\n{}{}",
+                    code, stdout, stderr
+                )
             }
-        }
-        BuildError::InvalidPath { path } => {
-            eprintln!("Hint: Check that the file exists and has correct permissions");
-        }
-        BuildError::CompilationError { .. } => {
-            eprintln!("Hint: Check the error messages above for compilation issues");
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum AppError {
-    Build(BuildError),
-    ArgumentError(String),
-    FileError { path: String, error: std::io::Error },
-    ParseError(String),
-    TypeError(String),
-    GenerationError(Option<String>, String),
-    ConfigParseError(String),
-}
-
-impl Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AppError::Build(err) => write!(f, "{}", err),
             AppError::ArgumentError(msg) => write!(f, "Argument error: {}", msg),
             AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
             AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
             AppError::GenerationError(hint, msg) => {
-                    writeln!(f, "Generation Error: {msg}");
-                    if let Some(hint) = hint {
-                        writeln!(f, "Hint: {hint}");
-                    }
-                    Ok(())
+                writeln!(f, "Generation Error: {msg}");
+                if let Some(hint) = hint {
+                    writeln!(f, "Hint: {hint}");
+                }
+                Ok(())
             }
             AppError::ConfigParseError(msg) => {
                 write!(f, "Parse configuration file failed: {}", msg)
@@ -223,12 +140,6 @@ impl Display for AppError {
 }
 
 impl std::error::Error for AppError {}
-
-impl From<BuildError> for AppError {
-    fn from(err: BuildError) -> Self {
-        AppError::Build(err)
-    }
-}
 
 pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
     let path = std::path::Path::new(file_path);
@@ -250,47 +161,6 @@ pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn generate_output_paths(file_path: &str) -> Result<(PathBuf, PathBuf, PathBuf), AppError> {
-    let input_path = PathBuf::from(file_path);
-
-    let asm_path = input_path.with_extension("asm");
-    let o_path = input_path.with_extension("o");
-    let exe_path = input_path.with_extension("");
-
-    if let Some(parent_dir) = input_path.parent() {
-        if !parent_dir.exists() {
-            return Err(AppError::FileError {
-                path: parent_dir.to_string_lossy().to_string(),
-                error: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Output directory does not exist",
-                ),
-            });
-        }
-    }
-
-    Ok((asm_path, o_path, exe_path))
-}
-
 pub fn handle_app_error(error: &AppError) {
-    match error {
-        AppError::Build(build_err) => handle_build_error(build_err),
-        AppError::ArgumentError(s) => {
-            eprintln!("Error: {s}");
-            eprintln!("Hint: Run with -h or --help for usage information");
-        }
-        AppError::FileError { path, error:os_error } => {
-            eprintln!("Error: {error}");
-            match os_error.kind() {
-                std::io::ErrorKind::NotFound => {
-                    eprintln!("Hint: Check that the file '{}' exists", path);
-                }
-                std::io::ErrorKind::PermissionDenied => {
-                    eprintln!("Hint: Check file permissions for '{}'", path);
-                }
-                _ => {}
-            }
-        }
-        _ => eprintln!("{error}")
-    }
+    eprintln!("{error}");
 }

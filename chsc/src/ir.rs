@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::chslexer::{Token, TokenKind};
+use crate::chslexer::*;
 
 #[derive(Debug, Default)]
 pub struct Program<'src> {

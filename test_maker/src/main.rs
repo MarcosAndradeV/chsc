@@ -25,6 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 usage();
                 process::exit(0);
             }
+            "--version" => {
+                println!("version: {VERSION}");
+                process::exit(0);
+            }
             "--record" | "-r" => record = true,
             "--replay" | "-p" => replay = true,
             "--write" | "-w" => write = true,
@@ -118,6 +122,7 @@ fn usage() {
     println!("  --write, -w            Write tests");
     println!("  --reset                Reset tests");
     println!("  --help, -h             Print this help message");
+    println!("  --version              Print version")
 }
 
 fn reset_tests(test_folder: &path::PathBuf) {
