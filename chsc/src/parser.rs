@@ -20,24 +20,11 @@ pub fn parse_module<'src>(
                 | "while"
                 | "if"
                 | "else"
-                | "include"
+                | "import"
         )
     });
 
-    let token = lexer.next_token();
-    if token.kind == TokenKind::Keyword && token.source != "module" {
-        unexpected_token(token, Some("Expected module definition"))?;
-    }
-
-    let name = expect(
-        &mut lexer,
-        TokenKind::Identifier,
-        Some("Expected module name"),
-    )?;
-    expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
-
     let mut module = Module {
-        name,
         ..Default::default()
     };
 
@@ -59,7 +46,7 @@ pub fn parse_module<'src>(
                 let r#extern = parse_extern_fn(&mut lexer)?;
                 module.add_extern_fn(r#extern);
             }
-            TokenKind::Keyword if token.source == "include" => {
+            TokenKind::Keyword if token.source == "import" => {
                 let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
                 let file_path = strings.alloc(file_path.unescape());
                 let source =
@@ -69,8 +56,8 @@ pub fn parse_module<'src>(
                     })?;
                 let source = strings.alloc(source);
                 let m = parse_module(strings, file_path, source)?;
-                module.funcs.extend(m.funcs);
-                module.externs.extend(m.externs);
+                module.imported_funcs.extend(m.funcs);
+                module.name_space.extend(m.name_space);
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
             }
             TokenKind::Keyword if token.source == "var" => {

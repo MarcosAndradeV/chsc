@@ -21,6 +21,19 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
         p.funcs.push(func);
     }
 
+    for f in &module.imported_funcs {
+        let uid = p.funcs.len();
+        names_index.insert_var_index(f.name.source, ir::Names::Func(uid));
+        let mut func = ir::Func {
+            name: f.name,
+            ..Default::default()
+        };
+
+        func.ret_type = f.ret_type.clone().map(convert_types).unwrap_or_default();
+
+        p.funcs.push(func);
+    }
+
     for f in module.externs {
         let uid = p.externs.len();
         names_index.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));

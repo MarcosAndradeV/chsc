@@ -1,24 +1,21 @@
 #![allow(unused)]
 
 use std::path::PathBuf;
-use std::{fs, process};
+use std::fs;
+use std::process;
 
-use generator::PUTU_FN;
-
-use crate::generator::generate;
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
 
-mod ast;
 mod chslexer;
-mod generator;
-mod ir;
-mod lower_ast;
 mod parser;
+mod ast;
+mod lower_ast;
+mod ir;
+mod generator;
 
 mod arena;
-mod fasm_backend;
 mod utils;
 
 fn main() {
@@ -71,18 +68,30 @@ fn app() -> Result<(), AppError> {
 
     let program_ast = parse_module(&strings, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
-    let asm_code = generate(program_ir, false)?;
 
     let input_path = PathBuf::from(file_path);
-    let asm_path = input_path.with_extension("asm");
     let exe_path = input_path.with_extension("");
 
-    fs::write(&asm_path, format!("{asm_code}\n{PUTU_FN}")).map_err(|e| AppError::FileError {
-        path: asm_path.to_string_lossy().to_string(),
-        error: e,
-    })?;
-
-    run_fasm(&asm_path, &exe_path)?;
+    match BACKEND {
+        Backend::FASM => {
+            let asm_path = input_path.with_extension("asm");
+            let asm_code = generator::fasm_generator::generate(program_ir, false)?;
+            fs::write(&asm_path, asm_code.to_string()).map_err(|e| AppError::FileError {
+                path: asm_path.to_string_lossy().to_string(),
+                error: e,
+            })?;
+            run_fasm(&asm_path, &exe_path)?;
+        }
+        Backend::C => {
+            let c_path = input_path.with_extension("c");
+            let c_code = generator::c_generator::generate(program_ir)?;
+            fs::write(&c_path, c_code.to_string()).map_err(|e| AppError::FileError {
+                path: c_path.to_string_lossy().to_string(),
+                error: e,
+            })?;
+            run_cc(&c_path, &exe_path)?;
+        }
+    }
 
     if run {
         run_exe(&exe_path).inspect(|(code, stdout, stderr)| {

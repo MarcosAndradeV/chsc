@@ -4,19 +4,20 @@ use crate::chslexer::{Loc, Token, TokenKind};
 
 #[derive(Default)]
 pub struct Module<'src> {
-    pub name: Token<'src>,
-    // pub name_space: HashMap<&'src str, Name>,
-    pub funcs: Vec<Func<'src>>,
+    // pub name: Token<'src>,
+    pub name_space: HashMap<&'src str, Name>,
     pub externs: Vec<ExternFunc<'src>>,
+
+    pub funcs: Vec<Func<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
     pub execs: Vec<Stmt<'src>>,
-    // imports
+    pub imported_funcs: Vec<Func<'src>>,
 }
 
 impl<'src> Module<'src> {
     pub fn add_fn(&mut self, r#fn: Func<'src>) {
-        // self.name_space
-        //     .insert(r#fn.name.source, Name::Func(self.funcs.len()));
+        self.name_space
+            .insert(r#fn.name.source, Name::Func(self.funcs.len()));
         self.funcs.push(r#fn);
     }
 

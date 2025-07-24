@@ -448,40 +448,9 @@ impl<'src> Lexer<'src> {
         loop {
             let ch = self.read_char();
             match ch {
-                _ if ch.is_ascii_whitespace() => {
-                    break;
-                }
-                b'(' => {
-                    kind = TokenKind::MacroCallWithArgs;
-                    // buffer.push('(');
-                    self.advance();
-                    let mut depth = 1;
-
-                    while depth > 0 {
-                        let ch = self.read_char();
-                        match ch {
-                            b'\0' => {
-                                return Token::new(
-                                    TokenKind::UnterminatedMacroArguments,
-                                    loc,
-                                    self.source[begin..self.pos].into(),
-                                );
-                            }
-                            b'(' => {
-                                depth += 1;
-                            }
-                            b')' => {
-                                depth -= 1;
-                            }
-                            _ => {}
-                        }
-                        // buffer.push(ch as char);
-                        self.advance();
-                    }
-                    break;
-                }
-                b'\0' => break,
-                _ => {} //buffer.push(ch as char),
+                b'a'..=b'z' | b'A'..=b'Z' | b'_' => (),
+                b'0'..=b'9' => (),
+                _ => break,
             }
             self.advance();
         }
@@ -505,16 +474,6 @@ impl fmt::Display for Token<'_> {
             TokenKind::UnexpectedCharacter => {
                 write!(f, "Unexpected Character `{}`", self.source.escape_default())
             }
-            TokenKind::UnterminatedMacroArguments => {
-                write!(
-                    f,
-                    "Unterminated Macro Arguments `{}`",
-                    self.source.escape_default()
-                )
-            }
-            TokenKind::UnterminatedMacro => {
-                write!(f, "Unterminated Macro `{}`", self.source.escape_default())
-            }
             TokenKind::InvalidEscapeSequence => {
                 write!(
                     f,
@@ -536,7 +495,7 @@ impl fmt::Display for Token<'_> {
                     self.source.escape_default()
                 )
             }
-            TokenKind::MacroCall | TokenKind::MacroCallWithArgs => {
+            TokenKind::MacroCall => {
                 write!(f, "Macro({})", self.source)
             }
             TokenKind::Keyword => write!(f, "Keyword({})", self.source),
@@ -610,8 +569,6 @@ pub enum TokenKind {
     EOF,
     Invalid,
     UnexpectedCharacter,
-    UnterminatedMacroArguments,
-    UnterminatedMacro,
     InvalidEscapeSequence,
     UnterminatedStringLiteral,
     UnknowIntergerLiteral,
@@ -624,7 +581,6 @@ pub enum TokenKind {
     CloseBrace,
 
     MacroCall,
-    MacroCallWithArgs,
 
     Identifier,
     Keyword,

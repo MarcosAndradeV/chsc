@@ -2,6 +2,11 @@ use std::ffi::OsStr;
 use std::process::{Command, Output};
 
 pub const STDLIB_PATH: &str = "stdlib";
+pub enum Backend {
+    C,
+    FASM,
+}
+pub const BACKEND: Backend = Backend::FASM;
 
 pub fn run_fasm<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
 where
@@ -27,6 +32,38 @@ where
     if !output.status.success() {
         return Err(AppError::CompilationError {
             command: "fasm".to_string(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+pub fn run_cc<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
+where
+    I: AsRef<OsStr>,
+    O: AsRef<OsStr>,
+{
+    let input_str = input_path.as_ref().to_string_lossy();
+
+    if !std::path::Path::new(&input_str.as_ref()).exists() {
+        return Err(AppError::InvalidPath {
+            path: input_str.to_string(),
+        });
+    }
+
+    let mut command = Command::new("cc");
+    command.arg(input_path).arg("-o").arg(output_path);
+
+    let output = command.output().map_err(|e| AppError::ProcessError {
+        command: "cc".to_string(),
+        error: e,
+    })?;
+
+    if !output.status.success() {
+        return Err(AppError::CompilationError {
+            command: "cc".to_string(),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
