@@ -1,4 +1,3 @@
-module std;
 
 fn memset(p *char, byte char, size int) -> *char {
     var i int = 0;
