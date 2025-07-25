@@ -5,9 +5,9 @@ use std::fmt::Write;
 
 pub fn generate(ast: Program) -> Result<String, AppError> {
     let mut out = String::new();
-    writeln!(&mut out, "#include<stdio.h>");
+    // writeln!(&mut out, "#include<stdio.h>");
     for r#extern in ast.externs {
-        write!(&mut out, "// extern ");
+        write!(&mut out, "extern ");
         chs_to_c_type(&mut out, &r#extern.ret);
         write!(&mut out, " {}(", r#extern.name);
         for (i, arg) in r#extern.args.iter().enumerate() {
