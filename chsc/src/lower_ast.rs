@@ -79,6 +79,31 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
         names_index.pop_scope();
     }
 
+    for f in module.imported_funcs {
+        let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
+            unreachable!()
+        };
+        names_index.push_scope();
+        let func = &mut p.funcs[uid];
+        for (arg, typ) in f.args {
+            func.args.push(arg);
+            let ty = convert_types(typ);
+            func.args_types.push(ty.clone());
+            let id = ir::VarId(func.vars.len());
+            names_index.insert_var_index(arg.source, ir::Names::Var(id));
+            func.vars.push(ir::Var {
+                loc: arg.loc,
+                ty,
+                is_vec: None,
+            });
+        }
+
+        for stmt in f.body {
+            compile_stmt(&mut names_index, stmt, &mut p, uid);
+        }
+        names_index.pop_scope();
+    }
+
     Ok(p)
 }
 
