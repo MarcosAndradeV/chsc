@@ -8,6 +8,20 @@ pub enum Backend {
 }
 pub const BACKEND: Backend = Backend::FASM;
 
+pub enum Os {
+    LINUX,
+    WINDOWS,
+    MACOS,
+}
+pub const OS: Os = Os::LINUX;
+
+pub enum Arch {
+    X86_64,
+    AARCH64,
+}
+pub const ARCH: Arch = Arch::X86_64;
+
+
 pub fn run_fasm<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
 where
     I: AsRef<OsStr>,
