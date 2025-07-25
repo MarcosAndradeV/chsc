@@ -104,9 +104,10 @@ fn app() -> Result<(), AppError> {
 }
 
 fn usage() {
-    println!("Usage: chsc [<COMMAND>] <input-file>");
+    println!("Usage: chsc <module>");
+    println!("   or: chsc <command> [arguments]");
     println!("Commands:");
-    println!("  run <input-file>   Compile <input-file> and run it");
-    println!("  help               Print this help message");
-    println!("  version            Print version");
+    println!("  run <module>  Compile module and run");
+    println!("  help          Print this help message");
+    println!("  version       Print version");
 }
