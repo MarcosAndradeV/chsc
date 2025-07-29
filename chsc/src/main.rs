@@ -1,19 +1,20 @@
 #![allow(unused)]
 
-use std::path::PathBuf;
+use std::collections::HashSet;
 use std::fs;
+use std::path::PathBuf;
 use std::process;
 
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
 
-mod chslexer;
-mod parser;
 mod ast;
-mod lower_ast;
-mod ir;
+mod chslexer;
 mod generator;
+mod ir;
+mod lower_ast;
+mod parser;
 
 mod arena;
 mod utils;
@@ -25,6 +26,11 @@ fn main() {
 }
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub static BACKEND: std::sync::LazyLock<Backend> =
+std::sync::LazyLock::new(|| parse_backend());
+// pub static OS: Os = parse_os();
+// pub static ARCH: Arch = parse_arch();
 
 /// I HATE RUST
 fn app() -> Result<(), AppError> {
@@ -65,14 +71,15 @@ fn app() -> Result<(), AppError> {
         error: e,
     })?;
     let source = strings.alloc(source);
+    let mut imported_modules = HashSet::new();
 
-    let program_ast = parse_module(&strings, &file_path, &source)?;
+    let program_ast = parse_module(&strings, &mut  imported_modules, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
 
     let input_path = PathBuf::from(file_path);
     let exe_path = input_path.with_extension("");
 
-    match BACKEND {
+    match *BACKEND {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
             let asm_code = generator::fasm_generator::generate(program_ir, false)?;

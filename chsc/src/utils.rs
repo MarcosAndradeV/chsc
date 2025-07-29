@@ -1,25 +1,52 @@
 use std::ffi::OsStr;
 use std::process::{Command, Output};
+use std::env;
 
 pub const STDLIB_PATH: &str = "stdlib";
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Backend {
     C,
     FASM,
 }
-pub const BACKEND: Backend = Backend::FASM;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Os {
     LINUX,
     WINDOWS,
     MACOS,
 }
-pub const OS: Os = Os::LINUX;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Arch {
     X86_64,
     AARCH64,
 }
-pub const ARCH: Arch = Arch::X86_64;
+
+pub fn parse_backend() -> Backend {
+    match env::var("CHSBACKEND").as_deref() {
+        Ok("C") => Backend::C,
+        Ok("FASM") => Backend::FASM,
+        _ => Backend::FASM, // Default
+    }
+}
+
+pub fn parse_os() -> Os {
+    match env::var("CHSOS").as_deref() {
+        Ok("LINUX") => Os::LINUX,
+        Ok("WINDOWS") => Os::WINDOWS,
+        Ok("MACOS") => Os::MACOS,
+        _ => Os::LINUX, // Default
+    }
+}
+
+pub fn parse_arch() -> Arch {
+    match env::var("CHSARCH").as_deref() {
+        Ok("X86_64") => Arch::X86_64,
+        Ok("AARCH64") => Arch::AARCH64,
+        _ => Arch::X86_64, // Default
+    }
+}
 
 
 pub fn run_fasm<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
