@@ -114,8 +114,10 @@ pub enum Stmt<'src> {
 
 #[derive(Debug)]
 pub enum Expr<'src> {
-    IntLit(Token<'src>),
+    IntLit(Loc<'src>, u64),
+    BoolLit(Loc<'src>, bool),
     StrLit(Token<'src>),
+
     Ident(Token<'src>),
     Deref(Loc<'src>, Box<Self>),
     Ref(Loc<'src>, Box<Self>),

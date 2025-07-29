@@ -7,6 +7,7 @@ pub struct Program<'src> {
     pub externs: Vec<ExternFunc<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
     pub funcs: Vec<Func<'src>>,
+    pub execs: Vec<Exec<'src>>,
 }
 
 #[derive(Debug)]
@@ -38,14 +39,21 @@ pub struct GlobalVar<'src> {
     pub is_vec: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Var<'src> {
     pub loc: Loc<'src>,
     pub ty: Type,
     pub is_vec: Option<usize>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
+pub struct Exec<'src> {
+    pub vars: Vec<Var<'src>>,
+    pub block_count: usize,
+    pub body: Vec<Stmt<'src>>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct Func<'src> {
     pub name: Token<'src>,
     pub args: Vec<Token<'src>>,
@@ -80,7 +88,7 @@ pub enum Type {
     PtrTo(Box<Self>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt<'src> {
     Store {
         target: Expr<'src>,
@@ -146,7 +154,7 @@ pub enum Stmt<'src> {
     Block(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr<'src> {
     Void(Loc<'src>),
     IntLit(Loc<'src>, u64),

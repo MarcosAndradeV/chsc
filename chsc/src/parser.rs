@@ -14,15 +14,8 @@ pub fn parse_module<'src>(
     let mut lexer = PeekableLexer::new(file_path, source);
     lexer.set_is_keyword_fn(|s| {
         matches!(
-            s, "fn"
-                | "return"
-                | "extern"
-                | "var"
-                | "syscall"
-                | "while"
-                | "if"
-                | "else"
-                | "import"
+            s,
+            "fn" | "return" | "extern" | "var" | "syscall" | "while" | "if" | "else" | "import"
         )
     });
 
@@ -38,10 +31,7 @@ pub fn parse_module<'src>(
         match token.kind {
             TokenKind::MacroCall if token.source == "@exec" => {
                 let stmt = parse_stmt(&mut lexer)?;
-                module.add_exec(Exec{
-                    token,
-                    stmt,
-                });
+                module.add_exec(Exec { token, stmt });
             }
             TokenKind::Keyword if token.source == "fn" => {
                 let r#fn = parse_fn(&mut lexer)?;
@@ -87,7 +77,13 @@ pub fn parse_module<'src>(
                     None
                 };
                 let r#type = parse_type(&mut lexer)?;
-                let expr = None;
+                let expr = if inspect(&mut lexer, &[TokenKind::Assign])? {
+                    lexer.next_token();
+                    let expr = parse_expr(&mut lexer, &[TokenKind::SemiColon], Precedence::Lowest)?;
+                    Some(expr)
+                } else {
+                    None
+                };
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 module.add_global_vars(GlobalVar {
                     name,
@@ -344,7 +340,7 @@ fn parse_expr<'src>(
     let mut left = match left_token.kind {
         TokenKind::IntegerNumber => {
             curr_precedence = Precedence::Highest;
-            Expr::IntLit(left_token)
+            Expr::IntLit(left_token.loc, left_token.source.parse().unwrap())
         }
         TokenKind::StringLiteral => {
             curr_precedence = Precedence::Highest;
@@ -352,7 +348,11 @@ fn parse_expr<'src>(
         }
         TokenKind::Identifier => {
             curr_precedence = Precedence::Highest;
-            Expr::Ident(left_token)
+            if matches!(left_token.source, "true" | "false") {
+                Expr::BoolLit(left_token.loc, left_token.source.parse().unwrap())
+            } else {
+                Expr::Ident(left_token)
+            }
         }
         TokenKind::Asterisk => {
             curr_precedence = Precedence::RefDeref;
@@ -472,25 +472,23 @@ fn next_token_is<'src>(
 
 fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T, AppError> {
     if let Some(msg) = msg {
-        Err(AppError::ParseError(format!(
-            "{}: Unexpected token {}, {}",
-            token.loc,
-            token,
-            msg.to_string()
-        )))
+        Err(AppError::ParseError{
+            path : token.loc.to_string(),
+            error: format!("Unexpected token {}, {}", token, msg.to_string())
+        })
     } else {
-        Err(AppError::ParseError(format!(
-            "{}: Unexpected token {}",
-            token.loc, token
-        )))
+        Err(AppError::ParseError{
+            path : token.loc.to_string(),
+            error: format!("Unexpected token {}", token)
+        })
     }
 }
 
 fn undefined<T>(token: Token<'_>) -> Result<T, AppError> {
-    Err(AppError::ParseError(format!(
-        "{}: Undefined name {}",
-        token.loc, token
-    )))
+    Err(AppError::ParseError{
+        path : token.loc.to_string(),
+        error: format!("Udefined name {}", token)
+    })
 }
 
 fn inspect<'src>(
@@ -506,10 +504,10 @@ fn inspect<'src>(
 }
 
 fn unexpected_end_of_file(token: &Token<'_>) -> Result<bool, AppError> {
-    Err(AppError::ParseError(format!(
-        "{}: Unexpected end of file",
-        token.loc
-    )))
+    Err(AppError::ParseError{
+        path : token.loc.to_string(),
+        error: format!("Unexpected end of file")
+    })
 }
 
 fn expect<'src>(

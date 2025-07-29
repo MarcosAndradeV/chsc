@@ -12,8 +12,8 @@ use crate::utils::*;
 mod ast;
 mod chslexer;
 mod generator;
-mod ir;
 mod interpreter;
+mod ir;
 mod lower_ast;
 mod parser;
 
@@ -28,12 +28,6 @@ fn main() {
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub static BACKEND: std::sync::LazyLock<Backend> =
-std::sync::LazyLock::new(|| parse_backend());
-// pub static OS: Os = parse_os();
-// pub static ARCH: Arch = parse_arch();
-
-/// I HATE RUST
 fn app() -> Result<(), AppError> {
     // Arena for happy borrow checker
     let strings = arena::Arena::new();
@@ -74,13 +68,16 @@ fn app() -> Result<(), AppError> {
     let source = strings.alloc(source);
     let mut imported_modules = HashSet::new();
 
-    let program_ast = parse_module(&strings, &mut  imported_modules, &file_path, &source)?;
+    let program_ast = parse_module(&strings, &mut imported_modules, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
+    if !program_ir.execs.is_empty() {
+        interpreter::Interpreter::new(&program_ir).run();
+    }
 
     let input_path = PathBuf::from(file_path);
     let exe_path = input_path.with_extension("");
 
-    match *BACKEND {
+    match parse_backend() {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
             let asm_code = generator::fasm_generator::generate(program_ir, false)?;
@@ -98,11 +95,6 @@ fn app() -> Result<(), AppError> {
                 error: e,
             })?;
             run_cc(&c_path, &exe_path)?;
-        }
-        Backend::Internal => {
-            let mut inter = interpreter::Interpreter::new(&program_ir);
-            inter.run("main");
-            return Ok(());
         }
     }
 
