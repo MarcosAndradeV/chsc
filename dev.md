@@ -11,7 +11,7 @@
 } @else_if @os(linux) {
     // Linux-specific code
 } @else {
-    static_assert(false, "Unsupported OS");
+    @exec assert(false, "Unsupported OS");
 }
 
 // Backend-specific configuration
@@ -20,7 +20,7 @@
 } @else_if @backend(fasm) {
     // FASM backend logic
 } @else {
-    static_assert(false, "Unsupported backend");
+    @exec assert(false, "Unsupported backend");
 }
 
 // Architecture-specific configuration
@@ -29,17 +29,6 @@
 } @else_if @arch(aarch64) {
     // ARM64 specific code
 } @else {
-    static_assert(false, "Unsupported arch");
+    @exec assert(false, "Unsupported arch");
 }
-```
-
-## Macro Expansions
-
-```c
-@macro assert(cond, msg) {
-    if (!(cond)) {
-        panic(msg);
-    }
-}
-
 ```
