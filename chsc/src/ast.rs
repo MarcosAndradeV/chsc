@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::chslexer::{Loc, Token, TokenKind};
+use crate::{arena::Arena, chslexer::{Loc, Token, TokenKind}};
 
 #[derive(Default)]
 pub struct Module<'src> {
@@ -10,8 +10,9 @@ pub struct Module<'src> {
 
     pub funcs: Vec<Func<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
-    pub execs: Vec<Stmt<'src>>,
-    pub imported_funcs: Vec<Func<'src>>,
+    pub strings : Arena<'src, String>,
+    pub execs: Vec<Exec<'src>>,
+    // pub imported_funcs: Vec<Func<'src>>,
 }
 
 impl<'src> Module<'src> {
@@ -32,8 +33,8 @@ impl<'src> Module<'src> {
         self.global_vars.push(var);
     }
 
-    pub fn add_exec(&mut self, stmt: Stmt<'src>) {
-        self.execs.push(stmt);
+    pub fn add_exec(&mut self, e: Exec<'src>) {
+        self.execs.push(e);
     }
 }
 
@@ -55,6 +56,11 @@ pub struct ExternFunc<'src> {
     pub args: Vec<Type<'src>>,
     pub ret_type: Option<Type<'src>>,
     pub is_variadic: bool,
+}
+
+pub struct Exec<'src> {
+    pub token: Token<'src>,
+    pub stmt: Stmt<'src>,
 }
 
 pub struct Func<'src> {

@@ -1,18 +1,20 @@
+use std::collections::HashSet;
+
 use crate::arena::Arena;
-use crate::ast::{Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
+use crate::ast::{Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
 use crate::chslexer::*;
 use crate::utils::AppError;
 
 pub fn parse_module<'src>(
     strings: &'src Arena<String>,
+    imported_modules: &mut HashSet<&'src str>,
     file_path: &'src str,
     source: &'src String,
 ) -> Result<Module<'src>, AppError> {
     let mut lexer = PeekableLexer::new(file_path, source);
     lexer.set_is_keyword_fn(|s| {
         matches!(
-            s,"module"
-                | "fn"
+            s, "fn"
                 | "return"
                 | "extern"
                 | "var"
@@ -36,7 +38,10 @@ pub fn parse_module<'src>(
         match token.kind {
             TokenKind::MacroCall if token.source == "@exec" => {
                 let stmt = parse_stmt(&mut lexer)?;
-                module.add_exec(stmt);
+                module.add_exec(Exec{
+                    token,
+                    stmt,
+                });
             }
             TokenKind::Keyword if token.source == "fn" => {
                 let r#fn = parse_fn(&mut lexer)?;
@@ -49,16 +54,19 @@ pub fn parse_module<'src>(
             TokenKind::Keyword if token.source == "import" => {
                 let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
                 let file_path = strings.alloc(file_path.unescape());
+                expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
+                if !imported_modules.insert(file_path.as_str()) {
+                    continue;
+                }
                 let source =
                     std::fs::read_to_string(&file_path).map_err(|e| AppError::FileError {
                         path: file_path.clone(),
                         error: e,
                     })?;
                 let source = strings.alloc(source);
-                let m = parse_module(strings, file_path, source)?;
-                module.imported_funcs.extend(m.funcs);
+                let m = parse_module(strings, imported_modules, file_path, source)?;
+                module.funcs.extend(m.funcs);
                 module.name_space.extend(m.name_space);
-                expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
             }
             TokenKind::Keyword if token.source == "var" => {
                 let name = expect(

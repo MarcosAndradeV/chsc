@@ -21,19 +21,6 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
         p.funcs.push(func);
     }
 
-    for f in &module.imported_funcs {
-        let uid = p.funcs.len();
-        names_index.insert_var_index(f.name.source, ir::Names::Func(uid));
-        let mut func = ir::Func {
-            name: f.name,
-            ..Default::default()
-        };
-
-        func.ret_type = f.ret_type.clone().map(convert_types).unwrap_or_default();
-
-        p.funcs.push(func);
-    }
-
     for f in module.externs {
         let uid = p.externs.len();
         names_index.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
@@ -44,6 +31,7 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
             ret: f.ret_type.map(convert_types).unwrap_or_default(),
         });
     }
+
     for v in module.global_vars {
         let uid = p.global_vars.len();
         names_index.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
@@ -55,31 +43,6 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
     }
 
     for f in module.funcs {
-        let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
-            unreachable!()
-        };
-        names_index.push_scope();
-        let func = &mut p.funcs[uid];
-        for (arg, typ) in f.args {
-            func.args.push(arg);
-            let ty = convert_types(typ);
-            func.args_types.push(ty.clone());
-            let id = ir::VarId(func.vars.len());
-            names_index.insert_var_index(arg.source, ir::Names::Var(id));
-            func.vars.push(ir::Var {
-                loc: arg.loc,
-                ty,
-                is_vec: None,
-            });
-        }
-
-        for stmt in f.body {
-            compile_stmt(&mut names_index, stmt, &mut p, uid);
-        }
-        names_index.pop_scope();
-    }
-
-    for f in module.imported_funcs {
         let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
             unreachable!()
         };
@@ -375,6 +338,7 @@ fn convert_types(ast_type: ast::Type) -> ir::Type {
         ast::Type::Name(token) if token.source == "char" => ir::Type::Char,
         ast::Type::Name(token) if token.source == "bool" => ir::Type::Bool,
         ast::Type::Name(token) if token.source == "ptr" => ir::Type::Ptr,
+        ast::Type::Name(token) if token.source == "void" => ir::Type::Void,
         ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(*t))),
         _ => todo!(),
     }

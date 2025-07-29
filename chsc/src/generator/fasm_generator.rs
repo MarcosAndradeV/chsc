@@ -58,7 +58,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
         }
 
         let call_convention = Register::get_call_convention();
-        if func.args.len() >= call_convention.len() {
+        if func.args.len() > call_convention.len() {
             return Err(AppError::GenerationError(
                 Some("Functions with more than 6 arguments are not supported yet.".to_string()),
                 "Args via stack are not implemented yet".to_string(),
@@ -155,6 +155,18 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                             raw_instr!(ctx.f, "sub {l}, {r}");
                             // out = l;
                         }
+                        TokenKind::DoublePipe => {
+                            mov_to_reg(&mut ctx, lhs, l);
+                            mov_to_reg(&mut ctx, rhs, r);
+                            raw_instr!(ctx.f, "or {l}, {r}");
+                            // out = l;
+                        }
+                        TokenKind::DoubleAmpersand => {
+                            mov_to_reg(&mut ctx, lhs, l);
+                            mov_to_reg(&mut ctx, rhs, r);
+                            raw_instr!(ctx.f, "and {l}, {r}");
+                            // out = l;
+                        }
                         TokenKind::Asterisk => {
                             raw_instr!(ctx.f, "xor rdx, rdx");
                             mov_to_reg(&mut ctx, lhs, l);
@@ -246,7 +258,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                     args,
                 } => {
                     let call_convention = Register::get_call_convention();
-                    if args.len() >= call_convention.len() {
+                    if args.len() > call_convention.len() {
                         return Err(AppError::GenerationError(
                             Some(
                                 "Functions with more than 6 arguments are not supported yet."
