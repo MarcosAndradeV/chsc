@@ -1,14 +1,14 @@
-module main;
-include "stdlib/std.chs";
+import "stdlib/linux.chs";
+import "stdlib/io.chs";
 
 var name[256] char;
 fn main() -> int {
-    puts("What is your name?\n");
+    put_string("What is your name?\n");
     var len int = read(0, name, 256);
     if (len <= 0) {
-        puts("Could not read name\n");
+        put_string("Could not read name\n");
         exit(1);
     }
-    puts("Hello "); puts(name);
+    put_string("Hello "); put_string(name);
     return 0;
 }

@@ -1,2 +1,0 @@
-cargo run -q --bin chsc -- -r --use-c examples/fib.chs
-rm examples/fib examples/fib.o examples/fib.asm

@@ -1,6 +1,5 @@
-extern fn printf(*char, ...) -> int;
-fn main() -> int {
-    printf("Hello, world\n");
-    printf("Hello, %d world\n", 42);
-    return 0;
+import "stdlib/io.chs";
+
+fn main() {
+    put_string("Hello, world\n");
 }
