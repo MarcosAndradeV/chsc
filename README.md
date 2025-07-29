@@ -12,5 +12,5 @@
 
 ```console
 $ cargo build --release
-$ ./target/release/chsc run ./examples/hello.chs
+$ ./target/release/chsc run ./examples/hello_world.chs
 ```
