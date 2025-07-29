@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::process::{Command, Output};
+use std::process::{exit, Command, Output};
 use std::env;
 
 pub const STDLIB_PATH: &str = "stdlib";
@@ -159,12 +159,16 @@ pub enum AppError {
     IoError(std::io::Error),
     Utf8Error(String),
     ExecutionFailed(i32, String, String), // (exit code, stderr)
+    InterpreterExit(i32),
     ArgumentError(String),
     FileError {
         path: String,
         error: std::io::Error,
     },
-    ParseError(String),
+    ParseError{
+        path: String,
+        error: String,
+    },
     TypeError(String),
     GenerationError(Option<String>, String),
     ConfigParseError(String),
@@ -201,7 +205,7 @@ impl std::fmt::Display for AppError {
             }
             AppError::ArgumentError(msg) => write!(f, "Argument error: {}", msg),
             AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
-            AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            AppError::ParseError{path, error } => write!(f, "{path}: {error}"),
             AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
             AppError::GenerationError(hint, msg) => {
                 writeln!(f, "Generation Error: {msg}");
@@ -212,6 +216,9 @@ impl std::fmt::Display for AppError {
             }
             AppError::ConfigParseError(msg) => {
                 write!(f, "Parse configuration file failed: {}", msg)
+            }
+            AppError::InterpreterExit(_) => {
+                Ok(())
             }
         }
     }
@@ -240,5 +247,5 @@ pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
 }
 
 pub fn handle_app_error(error: &AppError) {
-    eprintln!("{error}");
+    eprint!("{error}");
 }
