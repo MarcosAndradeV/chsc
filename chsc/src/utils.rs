@@ -178,24 +178,24 @@ impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AppError::ProcessError { command, error } => {
-                write!(f, "Failed to execute '{}': {}", command, error)
+                writeln!(f, "Failed to execute '{}': {}", command, error)
             }
             AppError::CompilationError {
                 command,
                 stdout,
                 stderr,
             } => {
-                write!(
+                writeln!(
                     f,
                     "'{}' failed:\nStdout: {}\nStderr: {}",
                     command, stdout, stderr
                 )
             }
             AppError::InvalidPath { path } => {
-                write!(f, "Invalid path: {}", path)
+                writeln!(f, "Invalid path: {}", path)
             }
-            AppError::IoError(e) => write!(f, "IO error: {}", e),
-            AppError::Utf8Error(e) => write!(f, "UTF-8 conversion error: {}", e),
+            AppError::IoError(e) => writeln!(f, "IO error: {}", e),
+            AppError::Utf8Error(e) => writeln!(f, "UTF-8 conversion error: {}", e),
             AppError::ExecutionFailed(code, stdout, stderr) => {
                 write!(
                     f,
@@ -203,10 +203,10 @@ impl std::fmt::Display for AppError {
                     code, stdout, stderr
                 )
             }
-            AppError::ArgumentError(msg) => write!(f, "Argument error: {}", msg),
-            AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
-            AppError::ParseError{path, error } => write!(f, "{path}: {error}"),
-            AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
+            AppError::ArgumentError(msg) => writeln!(f, "Argument error: {}", msg),
+            AppError::FileError { path, error } => writeln!(f, "File error '{}': {}", path, error),
+            AppError::ParseError{path, error } => writeln!(f, "{path}: {error}"),
+            AppError::TypeError(msg) => writeln!(f, "Type error: {}", msg),
             AppError::GenerationError(hint, msg) => {
                 writeln!(f, "Generation Error: {msg}");
                 if let Some(hint) = hint {
@@ -215,7 +215,7 @@ impl std::fmt::Display for AppError {
                 Ok(())
             }
             AppError::ConfigParseError(msg) => {
-                write!(f, "Parse configuration file failed: {}", msg)
+                writeln!(f, "Parse configuration file failed: {}", msg)
             }
             AppError::InterpreterExit(_) => {
                 Ok(())

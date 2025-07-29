@@ -43,7 +43,7 @@ fn app() -> Result<(), AppError> {
                 return Ok(());
             }
             "version" => {
-                println!("version: {VERSION}");
+                println!("chsc version: {VERSION}");
                 return Ok(());
             }
             "run" => {
@@ -109,10 +109,10 @@ fn app() -> Result<(), AppError> {
 }
 
 fn usage() {
-    println!("Usage: chsc <module>");
+    println!("Usage: chsc <input-file>");
     println!("   or: chsc <command> [arguments]");
     println!("Commands:");
-    println!("  run <module>  Compile module and run");
-    println!("  help          Print this help message");
-    println!("  version       Print version");
+    println!("  run <input-file>  Compile module and run");
+    println!("  help              Print this help message");
+    println!("  version           Print version");
 }
