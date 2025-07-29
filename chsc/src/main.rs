@@ -71,7 +71,7 @@ fn app() -> Result<(), AppError> {
     let program_ast = parse_module(&strings, &mut imported_modules, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
     if !program_ir.execs.is_empty() {
-        interpreter::Interpreter::new(&program_ir).run();
+        interpreter::Interpreter::new(&program_ir).exec();
     }
 
     let input_path = PathBuf::from(file_path);

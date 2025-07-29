@@ -72,7 +72,7 @@ impl<'src> Interpreter<'src> {
         self.return_slot = None;
     }
 
-    pub fn run(&mut self) -> Result<(), AppError> {
+    pub fn exec(&mut self) -> Result<(), AppError> {
         for exec in &self.program.execs {
             self.stack.push(Frame {
                 func: &exec.body,
