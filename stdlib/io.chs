@@ -5,5 +5,5 @@ fn put_string(x *char) {
 }
 
 fn is_print(c int) -> bool {
-	return c >= 32 && c <= 126;
+	return (c >= 32) && (c <= 126);
 }
