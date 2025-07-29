@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::{ast, interpreter};
 use crate::chslexer::TokenKind;
 use crate::ir;
 use crate::utils::AppError;
@@ -64,6 +64,31 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
         for stmt in f.body {
             compile_stmt(&mut names_index, stmt, &mut p, uid);
         }
+        names_index.pop_scope();
+    }
+    let up = unsafe {
+        ((&p) as *const ir::Program)
+            .as_ref()
+            .unwrap()
+    };
+    let mut interpreter = interpreter::Interpreter::new(&up);
+    for e in module.execs {
+        interpreter.reset();
+        let uid = p.funcs.len();
+        let mut func = ir::Func {
+            name: e.token,
+            ..Default::default()
+        };
+        p.funcs.push(func);
+
+        names_index.push_scope();
+        let func = &mut p.funcs[uid];
+
+        compile_stmt(&mut names_index, e.stmt, &mut p, uid);
+
+        interpreter.run(e.token.source);
+
+        p.funcs.pop();
         names_index.pop_scope();
     }
 

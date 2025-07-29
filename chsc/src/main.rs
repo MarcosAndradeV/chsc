@@ -13,6 +13,7 @@ mod ast;
 mod chslexer;
 mod generator;
 mod ir;
+mod interpreter;
 mod lower_ast;
 mod parser;
 
@@ -97,6 +98,11 @@ fn app() -> Result<(), AppError> {
                 error: e,
             })?;
             run_cc(&c_path, &exe_path)?;
+        }
+        Backend::Internal => {
+            let mut inter = interpreter::Interpreter::new(&program_ir);
+            inter.run("main");
+            return Ok(());
         }
     }
 
