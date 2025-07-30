@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use crate::arena::Arena;
 use crate::ast::{Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
+use crate::Compiler;
 use crate::chslexer::*;
 use crate::utils::AppError;
 
 pub fn parse_module<'src>(
-    strings: &'src Arena<String>,
+    c: &'src Compiler,
     imported_modules: &mut HashSet<&'src str>,
     file_path: &'src str,
     source: &'src String,
@@ -43,7 +43,7 @@ pub fn parse_module<'src>(
             }
             TokenKind::Keyword if token.source == "import" => {
                 let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
-                let file_path = strings.alloc(file_path.unescape());
+                let file_path = c.strings.alloc(file_path.unescape());
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 if !imported_modules.insert(file_path.as_str()) {
                     continue;
@@ -53,8 +53,8 @@ pub fn parse_module<'src>(
                         path: file_path.clone(),
                         error: e,
                     })?;
-                let source = strings.alloc(source);
-                let m = parse_module(strings, imported_modules, file_path, source)?;
+                let source = c.strings.alloc(source);
+                let m = parse_module(c, imported_modules, file_path, source)?;
                 module.funcs.extend(m.funcs);
                 module.name_space.extend(m.name_space);
             }

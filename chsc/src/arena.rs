@@ -1,18 +1,15 @@
-use std::marker::PhantomData;
 
 #[derive(Default)]
-pub struct Arena<'arena, T> {
-    phantom: PhantomData<&'arena T>,
+pub struct Arena<T> {
     pub inner: std::cell::RefCell<Vec<T>>,
 }
 
 const ARENA_DEFAULT_CAP: usize = 1024;
 
-impl<'arena, T> Arena<'arena, T> {
+impl<T> Arena<T> {
     pub fn new() -> Self {
         let capacity = ARENA_DEFAULT_CAP / std::mem::size_of::<T>();
         Self {
-            phantom: PhantomData,
             inner: Vec::with_capacity(capacity).into(),
         }
     }

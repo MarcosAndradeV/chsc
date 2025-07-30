@@ -5,6 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 
+use arena::Arena;
+
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
@@ -29,8 +31,7 @@ fn main() {
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn app() -> Result<(), AppError> {
-    // Arena for happy borrow checker
-    let strings = arena::Arena::new();
+    let c = Compiler::new();
 
     let mut args = std::env::args().skip(1);
     let mut file_path = None;
@@ -51,7 +52,7 @@ fn app() -> Result<(), AppError> {
             }
             input_file => {
                 validate_input_file(input_file)?;
-                file_path = Some(strings.alloc(arg));
+                file_path = Some(c.strings.alloc(arg));
             }
         }
     }
@@ -65,10 +66,10 @@ fn app() -> Result<(), AppError> {
         path: file_path.to_string(),
         error: e,
     })?;
-    let source = strings.alloc(source);
+    let source = c.strings.alloc(source);
     let mut imported_modules = HashSet::new();
 
-    let program_ast = parse_module(&strings, &mut imported_modules, &file_path, &source)?;
+    let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
     if !program_ir.execs.is_empty() {
         interpreter::Interpreter::new(&program_ir).exec();
@@ -115,4 +116,22 @@ fn usage() {
     println!("  run <input-file>  Compile module and run");
     println!("  help              Print this help message");
     println!("  version           Print version");
+}
+
+struct Compiler {
+    backend: Backend,
+    os: Os,
+    arch: Arch,
+    strings: Arena<String>,
+}
+
+impl Compiler {
+    fn new() -> Self {
+        Self {
+            backend: parse_backend(),
+            os: parse_os(),
+            arch: parse_arch(),
+            strings: Arena::new(),
+        }
+    }
 }

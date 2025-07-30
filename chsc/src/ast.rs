@@ -10,7 +10,6 @@ pub struct Module<'src> {
 
     pub funcs: Vec<Func<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
-    pub strings : Arena<'src, String>,
     pub execs: Vec<Exec<'src>>,
     // pub imported_funcs: Vec<Func<'src>>,
 }
