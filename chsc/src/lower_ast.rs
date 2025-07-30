@@ -1,5 +1,6 @@
 use crate::ast;
 use crate::chslexer::TokenKind;
+use crate::interpreter;
 use crate::ir;
 use crate::utils::AppError;
 
@@ -65,6 +66,35 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
             compile_stmt(&mut names_index, stmt, &mut p, uid);
         }
         names_index.pop_scope();
+    }
+    if !module.execs.is_empty() {
+        let uid = p.funcs.len();
+        let mut func = ir::Func {
+            name: module.execs[0].token,
+            ..Default::default()
+        };
+        p.funcs.push(func);
+
+        for e in module.execs {
+            names_index.push_scope();
+
+            compile_stmt(&mut names_index, e.stmt, &mut p, uid);
+
+            names_index.pop_scope();
+
+            let func = &mut p.funcs[uid];
+            let exec = ir::Exec {
+                vars: func.vars.clone(),
+                block_count: func.block_count,
+                body: func.body.clone(),
+            };
+            p.execs.push(exec);
+
+            func.vars.clear();
+            func.block_count = 0;
+            func.body.clear();
+        }
+        p.funcs.pop();
     }
 
     Ok(p)
@@ -138,6 +168,13 @@ fn compile_stmt<'src>(
                 let rhs = compile_expr(rhs, func, names_index, p);
                 func.body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
             }
+            ir::Expr::Global(token, id) => {
+                let rhs = compile_expr(rhs, func, names_index, p);
+                func.body.push(ir::Stmt::AssignGlobalVar {
+                    var: (token, id),
+                    rhs,
+                });
+            }
             _ => {}
         },
         ast::Stmt::While { loc, cond, body } => {
@@ -189,17 +226,29 @@ fn compile_expr<'src>(
     p: &ir::Program<'src>,
 ) -> ir::Expr<'src> {
     match expr {
-        ast::Expr::IntLit(token) => ir::Expr::IntLit(token.loc, token.source.parse().unwrap()),
+        ast::Expr::IntLit(loc, lit) => ir::Expr::IntLit(loc, lit),
+        ast::Expr::BoolLit(loc, lit) => ir::Expr::IntLit(loc, if lit { 1 } else { 0 }),
         ast::Expr::StrLit(token) => ir::Expr::StrLit(token),
         ast::Expr::Ident(token) => match names_index.get(token.source) {
             Some(ir::Names::Var(id)) => ir::Expr::Var(token.loc, *id),
             Some(ir::Names::GlobalVar(id)) => ir::Expr::Global(token, *id),
+            None => {
+                todo!(
+                    "{}",
+                    AppError::ParseError {
+                        path: token.loc.to_string(),
+                        error: format!("Undefined name `{token}`")
+                    }
+                    .to_string()
+                );
+            }
             _ => todo!(),
         },
         ast::Expr::Deref(loc, expr) => match compile_expr(*expr, func, &names_index, p) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
             ir::Expr::StrLit(token) => {
-                ir::Expr::CharLit(token.loc, token.unescape().as_bytes()[0] as char)
+                let unescape = token.unescape();
+                ir::Expr::CharLit(token.loc, unescape.chars().nth(0).unwrap_or('\0'))
             }
             _ => todo!(),
         },

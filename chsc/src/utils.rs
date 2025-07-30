@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::process::{Command, Output};
+use std::process::{exit, Command, Output};
 use std::env;
 
 pub const STDLIB_PATH: &str = "stdlib";
@@ -159,12 +159,16 @@ pub enum AppError {
     IoError(std::io::Error),
     Utf8Error(String),
     ExecutionFailed(i32, String, String), // (exit code, stderr)
+    InterpreterExit(i32),
     ArgumentError(String),
     FileError {
         path: String,
         error: std::io::Error,
     },
-    ParseError(String),
+    ParseError{
+        path: String,
+        error: String,
+    },
     TypeError(String),
     GenerationError(Option<String>, String),
     ConfigParseError(String),
@@ -174,24 +178,24 @@ impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AppError::ProcessError { command, error } => {
-                write!(f, "Failed to execute '{}': {}", command, error)
+                writeln!(f, "Failed to execute '{}': {}", command, error)
             }
             AppError::CompilationError {
                 command,
                 stdout,
                 stderr,
             } => {
-                write!(
+                writeln!(
                     f,
                     "'{}' failed:\nStdout: {}\nStderr: {}",
                     command, stdout, stderr
                 )
             }
             AppError::InvalidPath { path } => {
-                write!(f, "Invalid path: {}", path)
+                writeln!(f, "Invalid path: {}", path)
             }
-            AppError::IoError(e) => write!(f, "IO error: {}", e),
-            AppError::Utf8Error(e) => write!(f, "UTF-8 conversion error: {}", e),
+            AppError::IoError(e) => writeln!(f, "IO error: {}", e),
+            AppError::Utf8Error(e) => writeln!(f, "UTF-8 conversion error: {}", e),
             AppError::ExecutionFailed(code, stdout, stderr) => {
                 write!(
                     f,
@@ -199,10 +203,10 @@ impl std::fmt::Display for AppError {
                     code, stdout, stderr
                 )
             }
-            AppError::ArgumentError(msg) => write!(f, "Argument error: {}", msg),
-            AppError::FileError { path, error } => write!(f, "File error '{}': {}", path, error),
-            AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            AppError::TypeError(msg) => write!(f, "Type error: {}", msg),
+            AppError::ArgumentError(msg) => writeln!(f, "Argument error: {}", msg),
+            AppError::FileError { path, error } => writeln!(f, "File error '{}': {}", path, error),
+            AppError::ParseError{path, error } => writeln!(f, "{path}: {error}"),
+            AppError::TypeError(msg) => writeln!(f, "Type error: {}", msg),
             AppError::GenerationError(hint, msg) => {
                 writeln!(f, "Generation Error: {msg}");
                 if let Some(hint) = hint {
@@ -211,7 +215,10 @@ impl std::fmt::Display for AppError {
                 Ok(())
             }
             AppError::ConfigParseError(msg) => {
-                write!(f, "Parse configuration file failed: {}", msg)
+                writeln!(f, "Parse configuration file failed: {}", msg)
+            }
+            AppError::InterpreterExit(_) => {
+                Ok(())
             }
         }
     }
@@ -240,5 +247,5 @@ pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
 }
 
 pub fn handle_app_error(error: &AppError) {
-    eprintln!("{error}");
+    eprint!("{error}");
 }

@@ -156,11 +156,11 @@ impl<'src> Lexer<'src> {
 
             let tok = match ch {
                 b'/' if self.read_char() == b'/' => {
-                    while self.advance() != b'\n' {}
+                    while !matches!(self.advance(), b'\n' | b'\0') {}
                     continue;
                 }
                 b'#' => {
-                    while self.advance() != b'\n' {}
+                    while !matches!(self.advance(), b'\n' | b'\0') {}
                     continue;
                 }
                 b'-' if self.read_char() == b'>' => {

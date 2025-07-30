@@ -10,7 +10,6 @@ pub struct Module<'src> {
 
     pub funcs: Vec<Func<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
-    pub strings : Arena<'src, String>,
     pub execs: Vec<Exec<'src>>,
     // pub imported_funcs: Vec<Func<'src>>,
 }
@@ -114,8 +113,10 @@ pub enum Stmt<'src> {
 
 #[derive(Debug)]
 pub enum Expr<'src> {
-    IntLit(Token<'src>),
+    IntLit(Loc<'src>, u64),
+    BoolLit(Loc<'src>, bool),
     StrLit(Token<'src>),
+
     Ident(Token<'src>),
     Deref(Loc<'src>, Box<Self>),
     Ref(Loc<'src>, Box<Self>),

@@ -5,6 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 
+use arena::Arena;
+
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
@@ -12,6 +14,7 @@ use crate::utils::*;
 mod ast;
 mod chslexer;
 mod generator;
+mod interpreter;
 mod ir;
 mod lower_ast;
 mod parser;
@@ -27,15 +30,8 @@ fn main() {
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub static BACKEND: std::sync::LazyLock<Backend> =
-std::sync::LazyLock::new(|| parse_backend());
-// pub static OS: Os = parse_os();
-// pub static ARCH: Arch = parse_arch();
-
-/// I HATE RUST
 fn app() -> Result<(), AppError> {
-    // Arena for happy borrow checker
-    let strings = arena::Arena::new();
+    let c = Compiler::new();
 
     let mut args = std::env::args().skip(1);
     let mut file_path = None;
@@ -48,7 +44,7 @@ fn app() -> Result<(), AppError> {
                 return Ok(());
             }
             "version" => {
-                println!("version: {VERSION}");
+                println!("chsc version: {VERSION}");
                 return Ok(());
             }
             "run" => {
@@ -56,7 +52,7 @@ fn app() -> Result<(), AppError> {
             }
             input_file => {
                 validate_input_file(input_file)?;
-                file_path = Some(strings.alloc(arg));
+                file_path = Some(c.strings.alloc(arg));
             }
         }
     }
@@ -70,16 +66,19 @@ fn app() -> Result<(), AppError> {
         path: file_path.to_string(),
         error: e,
     })?;
-    let source = strings.alloc(source);
+    let source = c.strings.alloc(source);
     let mut imported_modules = HashSet::new();
 
-    let program_ast = parse_module(&strings, &mut  imported_modules, &file_path, &source)?;
+    let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
     let program_ir = lower_ast_to_ir(program_ast)?;
+    if !program_ir.execs.is_empty() {
+        interpreter::Interpreter::new(&program_ir).exec();
+    }
 
     let input_path = PathBuf::from(file_path);
     let exe_path = input_path.with_extension("");
 
-    match *BACKEND {
+    match parse_backend() {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
             let asm_code = generator::fasm_generator::generate(program_ir, false)?;
@@ -111,10 +110,28 @@ fn app() -> Result<(), AppError> {
 }
 
 fn usage() {
-    println!("Usage: chsc <module>");
+    println!("Usage: chsc <input-file>");
     println!("   or: chsc <command> [arguments]");
     println!("Commands:");
-    println!("  run <module>  Compile module and run");
-    println!("  help          Print this help message");
-    println!("  version       Print version");
+    println!("  run <input-file>  Compile module and run");
+    println!("  help              Print this help message");
+    println!("  version           Print version");
+}
+
+struct Compiler {
+    backend: Backend,
+    os: Os,
+    arch: Arch,
+    strings: Arena<String>,
+}
+
+impl Compiler {
+    fn new() -> Self {
+        Self {
+            backend: parse_backend(),
+            os: parse_os(),
+            arch: parse_arch(),
+            strings: Arena::new(),
+        }
+    }
 }
