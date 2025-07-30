@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use crate::ast::{Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
 use crate::Compiler;
+use crate::ast::{Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
 use crate::chslexer::*;
 use crate::utils::AppError;
 
@@ -35,14 +35,18 @@ pub fn parse_module<'src>(
             }
             TokenKind::Keyword if token.source == "fn" => {
                 let r#fn = parse_fn(&mut lexer)?;
-                module.add_fn(r#fn);
+                if let Some(name) = module.add_fn(r#fn) {
+                    todo!("Redefinition of name")
+                };
             }
             TokenKind::Keyword if token.source == "extern" => {
                 let r#extern = parse_extern_fn(&mut lexer)?;
-                module.add_extern_fn(r#extern);
+                if let Some(name) = module.add_extern_fn(r#extern) {
+                    todo!("Redefinition of name")
+                };
             }
             TokenKind::Keyword if token.source == "import" => {
-                let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some(""))?;
+                let file_path = expect(&mut lexer, TokenKind::StringLiteral, Some("File path not provided"))?;
                 let file_path = c.strings.alloc(file_path.unescape());
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 if !imported_modules.insert(file_path.as_str()) {
@@ -55,8 +59,15 @@ pub fn parse_module<'src>(
                     })?;
                 let source = c.strings.alloc(source);
                 let m = parse_module(c, imported_modules, file_path, source)?;
+                for (k, v) in m.name_space {
+                    if module.name_space.insert(k, v).is_some() {
+                        todo!("Redefinition of name in imported file")
+                    }
+                }
                 module.funcs.extend(m.funcs);
-                module.name_space.extend(m.name_space);
+                module.global_vars.extend(m.global_vars);
+                module.externs.extend(m.externs);
+                module.execs.extend(m.execs);
             }
             TokenKind::Keyword if token.source == "var" => {
                 let name = expect(
@@ -85,12 +96,14 @@ pub fn parse_module<'src>(
                     None
                 };
                 expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
-                module.add_global_vars(GlobalVar {
+                if let Some(name) = module.add_global_vars(GlobalVar {
                     name,
                     is_vec,
                     r#type,
                     expr,
-                });
+                }) {
+                    todo!("Redefinition of name")
+                };
             }
             _ => unexpected_token(token, Some("Expected a top level definition"))?,
         }
@@ -472,22 +485,22 @@ fn next_token_is<'src>(
 
 fn unexpected_token<T>(token: Token<'_>, msg: Option<impl ToString>) -> Result<T, AppError> {
     if let Some(msg) = msg {
-        Err(AppError::ParseError{
-            path : token.loc.to_string(),
-            error: format!("Unexpected token {}, {}", token, msg.to_string())
+        Err(AppError::ParseError {
+            path: token.loc.to_string(),
+            error: format!("Unexpected token {}, {}", token, msg.to_string()),
         })
     } else {
-        Err(AppError::ParseError{
-            path : token.loc.to_string(),
-            error: format!("Unexpected token {}", token)
+        Err(AppError::ParseError {
+            path: token.loc.to_string(),
+            error: format!("Unexpected token {}", token),
         })
     }
 }
 
 fn undefined<T>(token: Token<'_>) -> Result<T, AppError> {
-    Err(AppError::ParseError{
-        path : token.loc.to_string(),
-        error: format!("Udefined name {}", token)
+    Err(AppError::ParseError {
+        path: token.loc.to_string(),
+        error: format!("Udefined name {}", token),
     })
 }
 
@@ -504,9 +517,9 @@ fn inspect<'src>(
 }
 
 fn unexpected_end_of_file(token: &Token<'_>) -> Result<bool, AppError> {
-    Err(AppError::ParseError{
-        path : token.loc.to_string(),
-        error: format!("Unexpected end of file")
+    Err(AppError::ParseError {
+        path: token.loc.to_string(),
+        error: format!("Unexpected end of file"),
     })
 }
 

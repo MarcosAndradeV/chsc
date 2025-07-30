@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{arena::Arena, chslexer::{Loc, Token, TokenKind}};
+use crate::{
+    arena::Arena,
+    chslexer::{Loc, Token, TokenKind},
+};
 
 #[derive(Default)]
 pub struct Module<'src> {
@@ -15,21 +18,23 @@ pub struct Module<'src> {
 }
 
 impl<'src> Module<'src> {
-    pub fn add_fn(&mut self, r#fn: Func<'src>) {
-        self.name_space
-            .insert(r#fn.name.source, Name::Func(self.funcs.len()));
+    pub fn add_fn(&mut self, r#fn: Func<'src>) -> Option<Name> {
+        let k = r#fn.name.source;
         self.funcs.push(r#fn);
+        self.name_space.insert(k, Name::Func(self.funcs.len()))
     }
 
-    pub fn add_extern_fn(&mut self, r#extern: ExternFunc<'src>) {
-        // self.name_space
-        //     .insert(r#extern.name.source, Name::ExternFn(self.externs.len()));
+    pub fn add_extern_fn(&mut self, r#extern: ExternFunc<'src>) -> Option<Name> {
+        let k = r#extern.name.source;
         self.externs.push(r#extern);
+        self.name_space
+            .insert(k, Name::ExternFn(self.externs.len()))
     }
-    pub fn add_global_vars(&mut self, var: GlobalVar<'src>) {
-        // self.name_space
-        //     .insert(var.name.source, Name::GlobalVar(self.global_vars.len()));
+    pub fn add_global_vars(&mut self, var: GlobalVar<'src>) -> Option<Name> {
+        let k = var.name.source;
         self.global_vars.push(var);
+        self.name_space
+            .insert(k, Name::GlobalVar(self.global_vars.len()))
     }
 
     pub fn add_exec(&mut self, e: Exec<'src>) {
