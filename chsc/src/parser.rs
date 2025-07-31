@@ -67,6 +67,7 @@ pub fn parse_module<'src>(
                 }
                 module.funcs.extend(m.funcs);
                 module.global_vars.extend(m.global_vars);
+                module.consts.extend(m.consts);
                 module.externs.extend(m.externs);
                 module.execs.extend(m.execs);
             }

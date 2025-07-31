@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::ast;
 use crate::chslexer::TokenKind;
-use crate::interpreter::Interpreter;
+use crate::interpreter::{Interpreter, Value};
 use crate::ir;
 use crate::ir::Body;
 use crate::utils::AppError;
@@ -21,11 +21,14 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
                 let lhs = compile_expr(&mut p, &mut names_index, &mut body, *lhs);
                 let rhs = compile_expr(&mut p, &mut names_index, &mut body, *rhs);
 
-                let lhs = interpreter.eval_expr( &lhs);
-                let rhs =  interpreter.eval_expr(&rhs);
+                let lhs = interpreter.eval_expr(&lhs);
+                let rhs = interpreter.eval_expr(&rhs);
 
-                Interpreter::eval_binop(&operator, lhs, rhs);
-                todo!()
+                let Value::Int(v) = Interpreter::eval_binop(&operator, lhs, rhs) else {
+                    todo!()
+                };
+                assert!(v > 0, "Implement negative literals");
+                v as u64
             }
             _ => todo!(),
         };
