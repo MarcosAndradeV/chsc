@@ -29,7 +29,6 @@ pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'s
             }
             _ => todo!(),
         };
-        interpreter.
         names_index.insert_var_index(c.name.source, ir::Names::Const(v));
     }
 
