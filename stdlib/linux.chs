@@ -1,4 +1,8 @@
 
+const STDIN  = 0;
+const STDOUT = 1;
+const STDERR = 2;
+
 const SYS_READ  = 0;
 const SYS_WRITE = 1;
 const SYS_OPEN  = 2;
@@ -7,27 +11,27 @@ const SYS_STAT  = 4;
 const SYS_EXIT  = 60;
 
 fn read(fd int, buf *char, count int) -> int {
-    return syscall(0, fd, buf, count);
+    return syscall(SYS_READ, fd, buf, count);
 }
 
 fn write(fd int, buf *char, buf_len int) -> int {
-    return syscall(1, fd, buf, buf_len);
+    return syscall(SYS_WRITE, fd, buf, buf_len);
 }
 
 fn exit(code int) {
-    syscall(60, code);
+    syscall(SYS_EXIT, code);
 }
 
 fn open(path *char, flags int, mode int) -> int {
-    return syscall(2, path, flags, mode); // sys_open
+    return syscall(SYS_OPEN, path, flags, mode); // sys_open
 }
 
 fn close(fd int) -> int {
-    return syscall(3, fd); // sys_close
+    return syscall(SYS_CLOSE, fd); // sys_close
 }
 
 fn stat(path *char, statbuf *void) -> int {
-    return syscall(4, path, statbuf); // sys_stat
+    return syscall(SYS_STAT, path, statbuf); // sys_stat
 }
 
 fn fstat(fd int, statbuf *void) -> int {

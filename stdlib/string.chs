@@ -7,7 +7,6 @@ fn memset(p *char, byte char, size int) -> *char {
     return p;
 }
 
-
 fn strlen(s *char) -> int {
     var end *char = s;
     while((*end) != 0) {
