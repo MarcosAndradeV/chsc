@@ -48,6 +48,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
     }
 
     for func in ast.funcs {
+        if !func.used {continue;}
         let mut f = Function::new(m.link_with_c, func.name.source);
 
         let (size, offsets) = calculate_stack_offsets(&func.body.vars);

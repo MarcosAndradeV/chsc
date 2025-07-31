@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process;
 
 use arena::Arena;
+use ir::{Body, Func, Program, Stmt};
 
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
@@ -71,7 +72,14 @@ fn app() -> Result<(), AppError> {
 
     let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
     // TODO: Add type_checker
-    let program_ir = lower_ast_to_ir(program_ast)?;
+    let mut program_ir = lower_ast_to_ir(program_ast)?;
+    let mut used_func = vec![];
+    mark_used(&program_ir, &mut used_func, "main");
+    for name in used_func {
+        if let Some(f) = program_ir.funcs.iter_mut().find(|f| f.name.source == name) {
+            f.used = true;
+        }
+    }
 
     let input_path = PathBuf::from(file_path);
     let exe_path = input_path.with_extension("");
@@ -105,6 +113,22 @@ fn app() -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+fn mark_used<'src>(program_ir: &Program<'src>, used_func: &mut Vec<&'src str>, root: &'src str) {
+    if let Some(f) = program_ir.funcs.iter().find(|f| f.name.source == root) {
+        used_func.push(f.name.source);
+        for stmt in f.body.stmts.iter() {
+            if let Stmt::Funcall {
+                result: _,
+                caller,
+                args: _,
+            } = stmt
+            {
+                mark_used(program_ir, used_func, caller.source);
+            }
+        }
+    }
 }
 
 fn usage() {
