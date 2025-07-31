@@ -1,2 +1,0 @@
-cargo run -q --bin chsc -- -r --use-c tests/funcs.chs
-rm tests/funcs tests/funcs.o tests/funcs.asm

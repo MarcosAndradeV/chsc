@@ -1,2 +1,0 @@
-cargo run -q --bin chsc -- -r --use-c tests/ifs.chs
-rm tests/ifs tests/ifs.o tests/ifs.asm
