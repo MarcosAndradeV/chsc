@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::Compiler;
-use crate::ast::{Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
+use crate::ast::{Const, Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
 use crate::chslexer::*;
 use crate::utils::AppError;
 
@@ -16,6 +16,7 @@ pub fn parse_module<'src>(
         matches!(
             s,
             "fn" | "return" | "extern" | "var" | "syscall" | "while" | "if" | "else" | "import"
+            |"const"
         )
     });
 
@@ -105,6 +106,22 @@ pub fn parse_module<'src>(
                     todo!("Redefinition of name")
                 };
             }
+            TokenKind::Keyword if token.source == "const" => {
+                let name = expect(
+                    &mut lexer,
+                    TokenKind::Identifier,
+                    Some("Expected variable name"),
+                )?;
+                expect(&mut lexer, TokenKind::Assign, Some("Expected `=`"))?;
+                let expr = parse_expr(&mut lexer, &[TokenKind::SemiColon], Precedence::Lowest)?;
+                expect(&mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
+                if let Some(name) = module.add_consts(Const {
+                    name,
+                    expr
+                }) {
+                    todo!("Redefinition of name")
+                };
+            }
             _ => unexpected_token(token, Some("Expected a top level definition"))?,
         }
     }
@@ -164,7 +181,6 @@ fn parse_fn<'src>(lexer: &mut PeekableLexer<'src>) -> Result<Func<'src>, AppErro
     let name = expect(lexer, TokenKind::Identifier, Some("Expected function name"))?;
     let mut args = vec![];
     let mut ret_type = None;
-    let mut body = vec![];
 
     expect(lexer, TokenKind::OpenParen, Some("Expected `(`"))?;
     loop {
@@ -193,20 +209,7 @@ fn parse_fn<'src>(lexer: &mut PeekableLexer<'src>) -> Result<Func<'src>, AppErro
         }
     }
 
-    expect(lexer, TokenKind::OpenBrace, Some("Expected `{`"))?;
-    loop {
-        let ptoken = lexer.peek_token();
-        match ptoken.kind {
-            TokenKind::CloseBrace => {
-                lexer.next_token();
-                break;
-            }
-            _ => {
-                let stmt = parse_stmt(lexer)?;
-                body.push(stmt);
-            }
-        }
-    }
+    let body = parse_stmt(lexer)?;
 
     Ok(Func {
         name,

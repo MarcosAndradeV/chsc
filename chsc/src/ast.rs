@@ -13,6 +13,7 @@ pub struct Module<'src> {
 
     pub funcs: Vec<Func<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
+    pub consts: Vec<Const<'src>>,
     pub execs: Vec<Exec<'src>>,
     // pub imported_funcs: Vec<Func<'src>>,
 }
@@ -20,21 +21,30 @@ pub struct Module<'src> {
 impl<'src> Module<'src> {
     pub fn add_fn(&mut self, r#fn: Func<'src>) -> Option<Name> {
         let k = r#fn.name.source;
+        let len = self.funcs.len();
         self.funcs.push(r#fn);
-        self.name_space.insert(k, Name::Func(self.funcs.len()))
+        self.name_space.insert(k, Name::Func(len))
     }
-
     pub fn add_extern_fn(&mut self, r#extern: ExternFunc<'src>) -> Option<Name> {
         let k = r#extern.name.source;
+        let len = self.externs.len();
         self.externs.push(r#extern);
         self.name_space
-            .insert(k, Name::ExternFn(self.externs.len()))
+            .insert(k, Name::ExternFn(len))
     }
     pub fn add_global_vars(&mut self, var: GlobalVar<'src>) -> Option<Name> {
         let k = var.name.source;
+        let len = self.global_vars.len();
         self.global_vars.push(var);
         self.name_space
-            .insert(k, Name::GlobalVar(self.global_vars.len()))
+            .insert(k, Name::GlobalVar(len))
+    }
+    pub fn add_consts(&mut self, r#const: Const<'src>) -> Option<Name> {
+        let k = r#const.name.source;
+        let len = self.consts.len();
+        self.consts.push(r#const);
+        self.name_space
+            .insert(k, Name::Const(len))
     }
 
     pub fn add_exec(&mut self, e: Exec<'src>) {
@@ -44,8 +54,14 @@ impl<'src> Module<'src> {
 
 pub enum Name {
     GlobalVar(usize),
+    Const(usize),
     Func(usize),
     ExternFn(usize),
+}
+
+pub struct Const<'src> {
+    pub name: Token<'src>,
+    pub expr: Expr<'src>,
 }
 
 pub struct GlobalVar<'src> {
@@ -72,7 +88,7 @@ pub struct Func<'src> {
     pub args: Vec<(Token<'src>, Type<'src>)>,
     pub ret_type: Option<Type<'src>>,
 
-    pub body: Vec<Stmt<'src>>,
+    pub body: Stmt<'src>,
 }
 
 #[derive(Clone, Debug)]

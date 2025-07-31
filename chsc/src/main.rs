@@ -72,9 +72,6 @@ fn app() -> Result<(), AppError> {
     let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
     // TODO: Add type_checker
     let program_ir = lower_ast_to_ir(program_ast)?;
-    if !program_ir.execs.is_empty() {
-        interpreter::Interpreter::new(&program_ir).exec();
-    }
 
     let input_path = PathBuf::from(file_path);
     let exe_path = input_path.with_extension("");

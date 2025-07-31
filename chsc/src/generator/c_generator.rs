@@ -36,12 +36,12 @@ pub fn generate(ast: Program) -> Result<String, AppError> {
             write!(&mut out, " {}", arg);
         }
         write!(&mut out, "){{\n");
-        for (id, var) in func.vars.iter().enumerate() {
+        for (id, var) in func.body.vars.iter().enumerate() {
             chs_to_c_type(&mut out, &var.ty);
             write!(&mut out, " _{}", id);
             write!(&mut out, ";\n");
         }
-        for stmt in func.body {
+        for stmt in func.body.stmts {
             match stmt {
                 crate::ir::Stmt::Store { target, rhs } => {
                     chs_to_c_expr(&mut out, &target);
@@ -152,6 +152,9 @@ fn chs_to_c_expr(out: &mut String, epxr: &crate::ir::Expr<'_>) {
             write!(out, "\"{}\"", token.unescape().escape_default());
         }
         crate::ir::Expr::Var(loc, VarId(id)) => {
+            write!(out, "_{}", id);
+        }
+        crate::ir::Expr::Arg(loc, id) => {
             write!(out, "_{}", id);
         }
         crate::ir::Expr::Global(token, _) => todo!(),

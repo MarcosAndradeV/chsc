@@ -7,7 +7,6 @@ pub struct Program<'src> {
     pub externs: Vec<ExternFunc<'src>>,
     pub global_vars: Vec<GlobalVar<'src>>,
     pub funcs: Vec<Func<'src>>,
-    pub execs: Vec<Exec<'src>>,
 }
 
 #[derive(Debug)]
@@ -15,7 +14,9 @@ pub enum Names {
     ExternFunc(usize),
     Func(usize),
     GlobalVar(usize),
+    Const(u64),
     Var(VarId),
+    Arg(usize),
 }
 
 #[derive(Debug, Default)]
@@ -54,23 +55,41 @@ pub struct Exec<'src> {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct Body<'src> {
+    pub vars: Vec<Var<'src>>,
+    pub block_count: usize,
+    pub stmts: Vec<Stmt<'src>>,
+}
+impl<'src> Body<'src> {
+   pub  fn push(&mut self, value: Stmt<'src>)  {
+        self.stmts.push(value);
+    }
+    pub fn push_block(&mut self, bid: usize) {
+        self.push(Stmt::Block(bid));
+    }
+    pub fn next_block(&mut self) -> usize {
+        let bid = self.block_count;
+        self.block_count += 1;
+        bid
+    }
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct Func<'src> {
     pub name: Token<'src>,
     pub args: Vec<Token<'src>>,
     pub args_types: Vec<Type>,
     pub ret_type: Type,
 
-    pub vars: Vec<Var<'src>>,
-    pub block_count: usize,
-    pub body: Vec<Stmt<'src>>,
+    pub body: Body<'src>,
 }
 impl Func<'_> {
     pub fn push_block(&mut self, bid: usize) {
         self.body.push(Stmt::Block(bid));
     }
     pub fn next_block(&mut self) -> usize {
-        let bid = self.block_count;
-        self.block_count += 1;
+        let bid = self.body.block_count;
+        self.body.block_count += 1;
         bid
     }
 }
@@ -162,6 +181,7 @@ pub enum Expr<'src> {
     StrLit(Token<'src>),
 
     Var(Loc<'src>, VarId),
+    Arg(Loc<'src>, usize),
     Global(Token<'src>, usize),
 
     Deref(Loc<'src>, VarId),
@@ -174,6 +194,7 @@ pub fn type_of_expr<'src>(
     expr: &Expr<'src>,
     global_vars: &[GlobalVar<'src>],
     vars: &[Var<'src>],
+    args_types: &[Type],
 ) -> Result<Type, AppError> {
     match expr {
         Expr::Void(..) => Ok(Type::Void),
@@ -181,6 +202,7 @@ pub fn type_of_expr<'src>(
         Expr::CharLit(..) => Ok(Type::Char),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
+        Expr::Arg(token, id) => Ok(args_types[*id].clone()),
         Expr::Global(token, uid) => Ok(global_vars[*uid].ty.clone()),
         Expr::Deref(token, var_id) => match &vars[var_id.0].ty {
             Type::PtrTo(t) => Ok(t.as_ref().to_owned()),
@@ -233,6 +255,7 @@ impl<'src> Expr<'src> {
             Expr::CharLit(loc, _) => *loc,
             Expr::StrLit(token) => token.loc,
             Expr::Var(loc, _) => *loc,
+            Expr::Arg(loc, _) => *loc,
             Expr::Global(token, _) => token.loc,
             Expr::Deref(loc, _) => *loc,
             Expr::Ref(loc, _) => *loc,
@@ -249,6 +272,7 @@ impl<'src> std::fmt::Display for Expr<'src> {
             Expr::CharLit(_, lit) => write!(f, "{lit}"),
             Expr::StrLit(_) => write!(f, "@str"),
             Expr::Var(_, VarId(id)) => write!(f, "Var({id})"),
+            Expr::Arg(_, id) => write!(f, "Arg({id})"),
             Expr::Global(token, _) => write!(f, "{token}"),
             Expr::Deref(_, VarId(id)) => write!(f, "Deref({id})"),
             Expr::Ref(_, VarId(id)) => write!(f, "Ref({id})"),
@@ -382,8 +406,8 @@ fn print_func(func: &Func) {
     }
     println!(") -> {:?} {{", func.ret_type);
 
-    for stmt in &func.body {
-        print_stmt(&func.vars, stmt);
+    for stmt in &func.body.stmts {
+        print_stmt(&func.body.vars, stmt);
     }
 
     println!("}}");

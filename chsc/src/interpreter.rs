@@ -50,71 +50,33 @@ struct Frame<'src> {
 }
 
 pub struct Interpreter<'src> {
-    program: &'src Program<'src>,
-    globals: Vec<Value>,
     stack: Vec<Frame<'src>>,
-    return_slot: Option<VarId>,
 }
 
 impl<'src> Interpreter<'src> {
-    pub fn new(program: &'src Program<'src>) -> Self {
-        let globals = vec![Value::Void; program.global_vars.len()];
+    pub fn new() -> Self {
         Self {
-            program,
-            globals,
             stack: Vec::new(),
-            return_slot: None,
         }
     }
 
-    pub fn reset(&mut self) {
-        self.stack = Vec::new();
-        self.return_slot = None;
-    }
-
-    pub fn exec(&mut self) -> Result<(), AppError> {
-        for exec in &self.program.execs {
-            self.stack.push(Frame {
-                func: &exec.body,
-                vars: vec![Value::Void; exec.vars.len()],
-                ip: 0,
-            });
-            for stmt in &exec.body {
-                while let Some(frame) = self.stack.last_mut() {
-                    if frame.ip >= frame.func.len() {
-                        self.stack.pop();
-                        continue;
-                    }
-                    let stmt = &frame.func[frame.ip];
-                    frame.ip += 1;
-                    self.execute_stmt(stmt);
-                }
-            }
-        }
-        Ok(())
-    }
-    pub fn execute_stmt(&mut self, stmt: &Stmt<'src>) -> Result<(), AppError> {
+    pub fn execute_stmt(&mut self, p: &'src Program, stmt: &Stmt<'src>) -> Result<Option<Value>, AppError> {
         match stmt {
             Stmt::AssignVar { var, rhs, .. } => {
                 let val = self.eval_expr(rhs);
                 self.current_frame_mut().vars[var.0] = val;
             }
-            Stmt::AssignGlobalVar { var, rhs, .. } => {
-                let val = self.eval_expr(rhs);
-                self.globals[var.1] = val;
-            }
+            Stmt::AssignGlobalVar { var, rhs, .. } => todo!(),
+            // {
+            //     let val = self.eval_expr(rhs);
+            //     p.global_vars[var.1] = val;
+            // }
             Stmt::Return(_, maybe_expr) => {
                 let ret_val = maybe_expr
                     .as_ref()
-                    .map(|e| self.eval_expr(e))
-                    .unwrap_or(Value::Void);
+                    .map(|e| self.eval_expr(e));
                 self.stack.pop();
-                if let Some(dest) = self.return_slot.take() {
-                    if let Some(frame) = self.stack.last_mut() {
-                        frame.vars[dest.0] = ret_val;
-                    } else {
-                    }
-                }
+                return Ok(ret_val);
             }
             Stmt::Binop {
                 result,
@@ -124,7 +86,7 @@ impl<'src> Interpreter<'src> {
             } => {
                 let l = self.eval_expr(lhs);
                 let r = self.eval_expr(rhs);
-                let out = self.eval_binop(operator, l, r);
+                let out = Self::eval_binop(operator, l, r);
                 self.current_frame_mut().vars[result.0] = out;
             }
             Stmt::Jmp(target) => {
@@ -141,11 +103,11 @@ impl<'src> Interpreter<'src> {
                 match v {
                     Value::Int(n) if n != 0 => {}
                     Value::Bool(true) => {}
-                    _ => return Ok(()),
+                    _ => return Ok(None),
                 }
                 self.current_frame_mut().ip = self.find_block(*target);
             }
-            Stmt::Block(_) => {}
+            Stmt::Block(_) => return Ok(None),
             Stmt::Funcall {
                 result,
                 caller,
@@ -180,8 +142,7 @@ impl<'src> Interpreter<'src> {
                         }
                     }
                     _ => {
-                        let callee = self
-                            .program
+                        let callee = p
                             .funcs
                             .iter()
                             .find(|f| f.name.source == func_name)
@@ -194,8 +155,8 @@ impl<'src> Interpreter<'src> {
                         );
 
                         let mut frame = Frame {
-                            func: &callee.body,
-                            vars: vec![Value::Void; callee.vars.len()],
+                            func: &callee.body.stmts,
+                            vars: vec![Value::Void; callee.body.vars.len()],
                             ip: 0,
                         };
 
@@ -205,12 +166,6 @@ impl<'src> Interpreter<'src> {
                         }
 
                         self.stack.push(frame);
-
-                        if let Some(var_id) = result {
-                            self.return_slot = Some(*var_id);
-                        } else {
-                            self.return_slot = None;
-                        }
                     }
                 }
             }
@@ -225,7 +180,7 @@ impl<'src> Interpreter<'src> {
             }
             _ => todo!("stmt not yet implemented: {stmt:?}"),
         }
-        Ok(())
+        return Ok(None);
     }
     pub fn eval_expr(&self, expr: &Expr<'src>) -> Value {
         match expr {
@@ -234,11 +189,11 @@ impl<'src> Interpreter<'src> {
             Expr::CharLit(_, c) => Value::Char(*c),
             Expr::Var(_, v) => self.current_frame().vars[v.0].clone(),
             Expr::Deref(_, v) => self.current_frame().vars[v.0].as_deref(),
-            Expr::Global(_, idx) => self.globals[*idx].clone(),
+            // Expr::Global(_, idx) => self.globals[*idx].clone(),
             _ => todo!("expr not yet implemented: {expr:?}"),
         }
     }
-    pub fn eval_binop(&self, op: &Token<'_>, lhs: Value, rhs: Value) -> Value {
+    pub fn eval_binop(op: &Token<'_>, lhs: Value, rhs: Value) -> Value {
         match (lhs, rhs) {
             (Value::Int(l), Value::Int(r)) => match op.source {
                 "+" => Value::Int(l + r),

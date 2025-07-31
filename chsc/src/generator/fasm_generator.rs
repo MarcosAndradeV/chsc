@@ -50,7 +50,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
     for func in ast.funcs {
         let mut f = Function::new(m.link_with_c, func.name.source);
 
-        let (size, offsets) = calculate_stack_offsets(&func.vars);
+        let (size, offsets) = calculate_stack_offsets(&func.body.vars);
         f.allocate_stack(size);
         f.push_block("b");
         if func.ret_type != Type::Void {
@@ -82,11 +82,12 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
             f: &mut f,
             m: &mut m,
             global_vars: &ast.global_vars,
-            vars: &func.vars,
+            vars: &func.body.vars,
+            args_types: &func.args_types,
             offets: &offsets,
         };
 
-        for stmt in func.body {
+        for stmt in func.body.stmts {
             match stmt {
                 Stmt::Return(loc, expr) => {
                     anno_asm!(anno, ctx.f, "Return@{loc}");
@@ -335,12 +336,13 @@ struct GenCtx<'ctx, 'src> {
     m: &'ctx mut Module,
     global_vars: &'ctx [GlobalVar<'src>],
     vars: &'ctx [Var<'src>],
+    args_types: &'ctx [Type],
     offets: &'ctx [usize],
 }
 
 impl GenCtx<'_, '_> {
     fn type_of_expr(&self, expr: &Expr<'_>) -> Result<Type, AppError> {
-        type_of_expr(&expr, self.global_vars, self.vars)
+        type_of_expr(&expr, self.global_vars, self.vars, self.args_types)
     }
 
     fn get_offset(&self, id: usize) -> usize {
@@ -368,6 +370,24 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
         Expr::Var(token, VarId(id)) => {
             let offset = ctx.get_offset(id);
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
+            Ok(())
+        }
+        Expr::Arg(token, id) => {
+            let call_convention = Register::get_call_convention();
+            if id > call_convention.len() {
+                return Err(AppError::GenerationError(
+                    Some(
+                        "Functions with more than 6 arguments are not supported yet."
+                            .to_string(),
+                    ),
+                    "Args via stack are not implemented yet".to_string(),
+                ));
+            }
+
+            let arg_reg = call_convention[id];
+            if reg != arg_reg {
+                raw_instr!(ctx.f, "mov {reg}, {arg_reg}");
+            }
             Ok(())
         }
         Expr::Void(loc) => todo!(),
