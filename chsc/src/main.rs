@@ -19,6 +19,7 @@ mod interpreter;
 mod ir;
 mod lower_ast;
 mod parser;
+mod type_checker;
 
 mod arena;
 mod utils;
@@ -71,8 +72,8 @@ fn app() -> Result<(), AppError> {
     let mut imported_modules = HashSet::new();
 
     let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
-    // TODO: Add type_checker
     let mut program_ir = lower_ast_to_ir(program_ast)?;
+    // type_checker::check(&program_ir);
     let mut used_func = vec![];
     mark_used(&program_ir, &mut used_func, "main");
     for name in used_func {
