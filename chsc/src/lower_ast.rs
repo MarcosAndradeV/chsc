@@ -3,8 +3,8 @@ use std::cell::RefCell;
 use crate::ast;
 use crate::chslexer::TokenKind;
 use crate::interpreter::{Interpreter, Value};
-use crate::ir;
 use crate::ir::Body;
+use crate::ir::{self, type_of_expr};
 use crate::utils::AppError;
 
 pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'src>, AppError> {
@@ -175,11 +175,11 @@ fn compile_stmt<'src>(
                     rhs,
                 });
             }
-            target@ir::Expr::Deref(loc, id) => {
+            target @ ir::Expr::Deref(loc, id) => {
                 let rhs = compile_expr(p, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         },
         ast::Stmt::While {
             loc,
@@ -325,11 +325,18 @@ fn compile_expr<'src>(
 
             let id = ir::VarId(body.vars.len());
             let ty = match operator.kind {
-                TokenKind::Plus
-                | TokenKind::Minus
-                | TokenKind::Asterisk
-                | TokenKind::Slash
-                | TokenKind::Percent => {
+                TokenKind::Plus | TokenKind::Minus => {
+                    let lhs_ty = type_of_expr(&lhs, &p.global_vars, &body.vars).unwrap();
+                    let rhs_ty = type_of_expr(&rhs, &p.global_vars, &body.vars).unwrap();
+                    if matches!(lhs_ty, ir::Type::PtrTo(_)) {
+                        lhs_ty
+                    } else if matches!(rhs_ty, ir::Type::PtrTo(_)) {
+                        rhs_ty
+                    } else {
+                        ir::Type::Int
+                    }
+                }
+                TokenKind::Asterisk | TokenKind::Slash | TokenKind::Percent => {
                     // func.body.push(ir::Stmt::ArithmeticBinop {
                     //     result: id,
                     //     operator,

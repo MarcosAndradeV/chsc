@@ -343,7 +343,7 @@ struct GenCtx<'ctx, 'src> {
 
 impl GenCtx<'_, '_> {
     fn type_of_expr(&self, expr: &Expr<'_>) -> Result<Type, AppError> {
-        type_of_expr(&expr, self.global_vars, self.vars, self.args_types)
+        type_of_expr(&expr, self.global_vars, self.vars)
     }
 
     fn get_offset(&self, id: usize) -> usize {

@@ -195,7 +195,6 @@ pub fn type_of_expr<'src>(
     expr: &Expr<'src>,
     global_vars: &[GlobalVar<'src>],
     vars: &[Var<'src>],
-    args_types: &[Type],
 ) -> Result<Type, AppError> {
     match expr {
         Expr::Void(..) => Ok(Type::Void),
@@ -203,7 +202,7 @@ pub fn type_of_expr<'src>(
         Expr::CharLit(..) => Ok(Type::Char),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
-        Expr::Arg(token, id) => Ok(args_types[*id].clone()),
+        Expr::Arg(token, id) => todo!(),
         Expr::Global(token, uid) => Ok(global_vars[*uid].ty.clone()),
         Expr::Deref(token, var_id) => match &vars[var_id.0].ty {
             Type::PtrTo(t) => Ok(t.as_ref().to_owned()),
