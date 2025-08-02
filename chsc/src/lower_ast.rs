@@ -175,7 +175,11 @@ fn compile_stmt<'src>(
                     rhs,
                 });
             }
-            _ => {}
+            target@ir::Expr::Deref(loc, id) => {
+                let rhs = compile_expr(p, names_index, body, rhs);
+                body.push(ir::Stmt::Store { target, rhs });
+            }
+            _ => unreachable!()
         },
         ast::Stmt::While {
             loc,
