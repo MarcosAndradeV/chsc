@@ -95,15 +95,6 @@ fn app() -> Result<(), AppError> {
             })?;
             run_fasm(&asm_path, &exe_path)?;
         }
-        Backend::C => {
-            let c_path = input_path.with_extension("c");
-            let c_code = generator::c_generator::generate(program_ir)?;
-            fs::write(&c_path, c_code.to_string()).map_err(|e| AppError::FileError {
-                path: c_path.to_string_lossy().to_string(),
-                error: e,
-            })?;
-            run_cc(&c_path, &exe_path)?;
-        }
     }
 
     if run {

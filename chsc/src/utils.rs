@@ -4,28 +4,26 @@ use std::env;
 
 pub const STDLIB_PATH: &str = "stdlib";
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum Backend {
-    C,
-    FASM,
+    #[default] FASM,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum Os {
-    LINUX,
+    #[default] LINUX,
     WINDOWS,
     MACOS,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum Arch {
-    X86_64,
+    #[default] X86_64,
     AARCH64,
 }
 
 pub fn parse_backend() -> Backend {
     match env::var("CHSBACKEND").as_deref() {
-        Ok("C") => Backend::C,
         Ok("FASM") => Backend::FASM,
         _ => Backend::FASM, // Default
     }
