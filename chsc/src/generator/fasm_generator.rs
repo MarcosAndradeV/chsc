@@ -110,7 +110,6 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                     raw_instr!(ctx.f, "mov [rbp-{offset}], {r}");
                 }
                 Stmt::Store { target, rhs } => {
-                    let rhs_ty = ctx.type_of_expr(&rhs)?;
                     let reg = Register::Rax;
                     mov_to_reg(&mut ctx, rhs, reg);
                     match target {
@@ -122,12 +121,29 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                             raw_instr!(ctx.f, "mov {s} [rbx], {reg}");
                         }
                         Expr::GlobalDeref(token, uid) => {
-                            todo!()
+                            let s = size_of_type(&ctx.global_vars[uid].ty);
+                            let reg = s.register_for_size(reg);
+                            if ctx.global_vars[uid].is_vec.is_some() {
+                                raw_instr!(ctx.f, "mov rbx, _{token}");
+                            } else {
+                                raw_instr!(ctx.f, "mov rbx, [_{token}]");
+                            }
+                            raw_instr!(ctx.f, "mov {s} [rbx], {reg}");
                         }
                         _ => unreachable!(),
                     }
                 }
-                Stmt::AssignGlobalVar { var, rhs } => todo!(),
+                Stmt::AssignGlobalVar { var:(token, uid), rhs } => {
+                    let reg = Register::Rax;
+                    mov_to_reg(&mut ctx, rhs, reg);
+                    let s = size_of_type(&ctx.global_vars[uid].ty);
+                    let reg = s.register_for_size(reg);
+                    if ctx.global_vars[uid].is_vec.is_some() {
+                        raw_instr!(ctx.f, "mov _{token}, {reg}");
+                    } else {
+                        raw_instr!(ctx.f, "mov [_{token}], {reg}");
+                    }
+                }
                 Stmt::Unop {
                     result,
                     operator,
@@ -342,9 +358,6 @@ struct GenCtx<'ctx, 'src> {
 }
 
 impl GenCtx<'_, '_> {
-    fn type_of_expr(&self, expr: &Expr<'_>) -> Result<Type, AppError> {
-        type_of_expr(&expr, self.global_vars, self.vars)
-    }
 
     fn get_offset(&self, id: usize) -> usize {
         self.offets[id]
@@ -356,8 +369,6 @@ impl GenCtx<'_, '_> {
 }
 
 fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), AppError> {
-    // let ty = ctx.type_of_expr(&expr)?;
-    // let sty = size_of_type(&ty);
     match expr {
         Expr::IntLit(loc, lit) => {
             raw_instr!(ctx.f, "mov {reg}, {lit}");
@@ -486,7 +497,7 @@ fn size_of_type(ty: &Type) -> SizeOperator {
         // Type::Int16 => SizeOperator::Word,
         Type::Int | Type::Bool => SizeOperator::Dword,
         Type::Ptr => SizeOperator::Qword,
-        Type::PtrTo(inner) => size_of_type(inner.as_ref()),
+        Type::PtrTo(inner) => SizeOperator::Qword,
         _ => todo!(),
     }
 }

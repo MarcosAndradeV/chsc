@@ -1,9 +1,10 @@
 #![allow(unused)]
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::process;
+use std::process::{self, exit};
 
 use arena::Arena;
 use ir::{Body, Func, Program, Stmt};
@@ -25,16 +26,16 @@ mod arena;
 mod utils;
 
 fn main() {
-    if let Err(err) = app() {
-        handle_app_error(&err);
+    let c = Compiler::new();
+    if let Err(err) = app(&c) {
+        c.report_errors();
+        exit(1);
     }
 }
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn app() -> Result<(), AppError> {
-    let c = Compiler::new();
-
+fn app(c: &Compiler) -> Result<(), ()> {
     let mut args = std::env::args().skip(1);
     let mut file_path = None;
     let mut run = false;
@@ -53,7 +54,7 @@ fn app() -> Result<(), AppError> {
                 run = true;
             }
             input_file => {
-                validate_input_file(input_file)?;
+                validate_input_file(&c, &input_file)?;
                 file_path = Some(c.strings.alloc(arg));
             }
         }
@@ -61,18 +62,16 @@ fn app() -> Result<(), AppError> {
 
     let Some(file_path) = file_path else {
         usage();
-        return Err(AppError::ArgumentError("No input file".to_string()));
+        c.compiler_error("No input file".to_string())?
     };
 
-    let source = fs::read_to_string(&file_path).map_err(|e| AppError::FileError {
-        path: file_path.to_string(),
-        error: e,
-    })?;
+    let source = fs::read_to_string(&file_path).unwrap();
+
     let source = c.strings.alloc(source);
     let mut imported_modules = HashSet::new();
 
     let program_ast = parse_module(&c, &mut imported_modules, &file_path, &source)?;
-    let mut program_ir = lower_ast_to_ir(program_ast)?;
+    let mut program_ir = lower_ast_to_ir(program_ast).unwrap();
     // type_checker::check(&program_ir);
     let mut used_func = vec![];
     mark_used(&program_ir, &mut used_func, "main");
@@ -82,18 +81,22 @@ fn app() -> Result<(), AppError> {
         }
     }
 
+    if c.has_errors() {return Err(());}
+
     let input_path = PathBuf::from(file_path);
+    let o_path = input_path.with_extension("o");
     let exe_path = input_path.with_extension("");
 
     match parse_backend() {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
-            let asm_code = generator::fasm_generator::generate(program_ir, false)?;
+            let asm_code = generator::fasm_generator::generate(program_ir, true).unwrap();
             fs::write(&asm_path, asm_code.to_string()).map_err(|e| AppError::FileError {
                 path: asm_path.to_string_lossy().to_string(),
                 error: e,
-            })?;
-            run_fasm(&asm_path, &exe_path)?;
+            }).unwrap();
+            run_fasm(&asm_path, &o_path).unwrap();
+            run_cc(&o_path, &exe_path, &["-l:libchs.a", "-Lstdlib/libchs"]).unwrap();
         }
     }
 
@@ -101,7 +104,7 @@ fn app() -> Result<(), AppError> {
         run_exe(&exe_path).inspect(|(code, stdout, stderr)| {
             print!("{stdout}{stderr}");
             process::exit(*code);
-        })?;
+        }).unwrap();
     }
 
     Ok(())
@@ -132,20 +135,45 @@ fn usage() {
     println!("  version           Print version");
 }
 
+#[derive(Default)]
 struct Compiler {
     backend: Backend,
     os: Os,
     arch: Arch,
     strings: Arena<String>,
+    diag: RefCell<Vec<Diag>>,
 }
 
 impl Compiler {
     fn new() -> Self {
-        Self {
-            backend: parse_backend(),
-            os: parse_os(),
-            arch: parse_arch(),
-            strings: Arena::new(),
+        Self::default()
+    }
+
+    fn compiler_error<T>(&self, format: String) -> Result<T, ()> {
+        self.diag.borrow_mut().push(Diag::Error(format));
+        Err(())
+    }
+
+    fn report_errors(&self) -> bool {
+        let mut diag = self.diag.borrow_mut();
+        if !diag.is_empty() {
+            for d in diag.drain(..) {
+                match d {
+                    Diag::Error(e) =>eprintln!("{e}")
+                }
+            }
+            return true;
+        } else {
+            return false;
         }
     }
+
+    fn has_errors(&self) -> bool {
+        let diag = self.diag.borrow();
+        diag.iter().find(|d| matches!(d, Diag::Error(..))).is_some()
+    }
+}
+
+enum Diag {
+    Error(String),
 }

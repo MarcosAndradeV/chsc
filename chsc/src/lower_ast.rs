@@ -179,6 +179,10 @@ fn compile_stmt<'src>(
                 let rhs = compile_expr(p, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
+            target @ ir::Expr::GlobalDeref(loc, id) => {
+                let rhs = compile_expr(p, names_index, body, rhs);
+                body.push(ir::Stmt::Store { target, rhs });
+            }
             _ => unreachable!(),
         },
         ast::Stmt::While {
@@ -261,6 +265,7 @@ fn compile_expr<'src>(
                 let unescape = token.unescape();
                 ir::Expr::CharLit(token.loc, unescape.chars().nth(0).unwrap_or('\0'))
             }
+            ir::Expr::Global(token, uid) => ir::Expr::GlobalDeref(token, uid),
             _ => todo!(),
         },
         ast::Expr::Ref(loc, expr) => match compile_expr(p, names_index, body, *expr) {
@@ -407,6 +412,6 @@ fn convert_types(ast_type: ast::Type) -> ir::Type {
         ast::Type::Name(token) if token.source == "ptr" => ir::Type::Ptr,
         ast::Type::Name(token) if token.source == "void" => ir::Type::Void,
         ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(*t))),
-        _ => todo!(),
+        _ => todo!("{ast_type:?}"),
     }
 }

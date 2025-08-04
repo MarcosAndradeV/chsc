@@ -59,6 +59,17 @@ pub enum Name {
     ExternFn(usize),
 }
 
+impl Name {
+    pub fn get_str<'src>(&self, m: &'src Module) -> &'src str {
+        match self {
+            Name::GlobalVar(id) => m.global_vars[*id].name.source,
+            Name::Const(id) => m.consts[*id].name.source,
+            Name::Func(id) => m.funcs[*id].name.source,
+            Name::ExternFn(id) => m.externs[*id].name.source,
+        }
+    }
+}
+
 pub struct Const<'src> {
     pub name: Token<'src>,
     pub expr: Expr<'src>,

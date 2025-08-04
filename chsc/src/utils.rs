@@ -2,6 +2,8 @@ use std::ffi::OsStr;
 use std::process::{exit, Command, Output};
 use std::env;
 
+use crate::Compiler;
+
 pub const STDLIB_PATH: &str = "stdlib";
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -79,10 +81,12 @@ where
     Ok(())
 }
 
-pub fn run_cc<I, O>(input_path: I, output_path: O) -> Result<(), AppError>
+pub fn run_cc<I, O, Args, S>(input_path: I, output_path: O, args: Args) -> Result<(), AppError>
 where
     I: AsRef<OsStr>,
     O: AsRef<OsStr>,
+    Args: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
 {
     let input_str = input_path.as_ref().to_string_lossy();
 
@@ -93,7 +97,7 @@ where
     }
 
     let mut command = Command::new("cc");
-    command.arg(input_path).arg("-o").arg(output_path);
+    command.arg(input_path).arg("-o").arg(output_path).args(args);
 
     let output = command.output().map_err(|e| AppError::ProcessError {
         command: "cc".to_string(),
@@ -224,21 +228,17 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-pub fn validate_input_file(file_path: &str) -> Result<(), AppError> {
+pub fn validate_input_file(c: &Compiler, file_path: &str) -> Result<(), ()> {
     let path = std::path::Path::new(file_path);
 
     if !path.exists() {
-        return Err(AppError::FileError {
-            path: file_path.to_string(),
-            error: std::io::Error::new(std::io::ErrorKind::NotFound, "File does not exist"),
-        });
+        let error = std::io::Error::new(std::io::ErrorKind::NotFound, "File does not exist");
+        c.compiler_error(format!("File error '{}': {}", path.display(), error))?;
     }
 
     if !path.is_file() {
-        return Err(AppError::FileError {
-            path: file_path.to_string(),
-            error: std::io::Error::new(std::io::ErrorKind::InvalidInput, "Path is not a file"),
-        });
+        let error = std::io::Error::new(std::io::ErrorKind::InvalidInput, "Path is not a file");
+        c.compiler_error(format!("File error '{}': {}", path.display(), error))?;
     }
 
     Ok(())
