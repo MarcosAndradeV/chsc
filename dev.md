@@ -32,3 +32,4 @@
     @exec assert(false, "Unsupported arch");
 }
 ```
+cc -c stdlib/libchs/libchs.c -static -o stdlib/libchs/libchs.a -O3
