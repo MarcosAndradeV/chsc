@@ -1,13 +1,21 @@
 import "stdlib/io.chs";
 
-fn main() -> int {
+fn fib(x int) {
     var a int = 0;
     var b int = 1;
-    while(a < 100) {
-        putln_int(a);
+    while(a <= x) {
+        put_int(a);
         var c int = b;
         b = a + b;
         a = c;
+        if(a < x){
+            put_string(",");
+        }
+        put_string(" ");
     }
-    return 0;
+    putln_string("");
+}
+
+fn main() {
+    fib(100);
 }
