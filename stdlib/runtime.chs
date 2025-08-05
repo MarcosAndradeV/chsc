@@ -6,3 +6,4 @@ extern fn put_string(*char);
 extern fn putln_string(*char);
 extern fn put_bool(bool);
 extern fn putln_bool(bool);
+extern fn get_chs_rt_version() -> int;

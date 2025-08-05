@@ -1,5 +1,7 @@
-#define LIB_CHS
+#define CHS_RT_VERSION 1
 #include <stdio.h>
+
+/// io
 
 void put_int(int x) { printf("%d", x); }
 void putln_int(int x) { printf("%d\n", x); }
@@ -11,7 +13,11 @@ void put_string(const char* x) { printf("%s", x); }
 void putln_string(const char* x) { printf("%s\n", x); }
 
 void put_bool(int x) { x ? printf("true") : printf("false"); }
-void putln_bool(int x){ x ? printf("true\n") : printf("false\n"); }
+void putln_bool(int x) { x ? printf("true\n") : printf("false\n"); }
+
+/// chs runtime
+
+int get_chs_rt_version() { return CHS_RT_VERSION; }
 
 
 // void put_int(uint32_t input) {
