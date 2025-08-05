@@ -7,55 +7,48 @@ use crate::ir::{self, type_of_expr};
 use crate::utils::AppError;
 use crate::{Compiler, ast};
 
-pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<ir::Program<'src>, AppError> {
-    let mut p = ir::Program::default();
-    let mut names_index = ir::NameSpace::default();
-
-    names_index.push_scope();
-    let mut interpreter = Interpreter::new();
+pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
+    let mut local_name_space = ir::NameSpace::default();
+    local_name_space.push_scope();
 
     for module in c.modules.borrow().values() {
-        for c in &module.consts {
-            let mut body = Body::default();
-            let v = match &c.expr {
-                ast::Expr::IntLit(loc, i) => *i,
+        for c in module.consts.iter() {
+            let lit = match c.expr {
+                ast::Expr::IntLit(loc, lit) => lit,
                 _ => todo!(),
             };
-            names_index.insert_var_index(c.name.source, ir::Names::Const(v));
+            local_name_space.insert_var_index(c.name.source, ir::Names::Const(lit));
         }
 
         for f in &module.externs {
-            let uid = p.externs.len();
-            names_index.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
-            p.externs.push(ir::ExternFunc {
+            let uid = c.add_program_extern(ir::ExternFunc {
+                used:false,
                 name: f.name,
                 args: f.args.iter().map(convert_types).collect(),
                 is_variadic: f.is_variadic,
                 ret: f.ret_type.as_ref().map(convert_types).unwrap_or_default(),
             });
+            local_name_space.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
         }
 
         for f in &module.funcs {
-            let uid = p.funcs.len();
-            names_index.insert_var_index(f.name.source, ir::Names::Func(uid));
-            let mut func = ir::Func {
+            let r#fn = ir::Func {
                 name: f.name,
+                ret_type: f.ret_type.as_ref().map(convert_types).unwrap_or_default(),
                 ..Default::default()
             };
+            let uid = c.add_program_func(r#fn);
+            local_name_space.insert_var_index(f.name.source, ir::Names::Func(uid));
 
-            func.ret_type = f.ret_type.as_ref().map(convert_types).unwrap_or_default();
-
-            p.funcs.push(func);
         }
 
         for v in &module.global_vars {
-            let uid = p.global_vars.len();
-            names_index.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
-            p.global_vars.push(ir::GlobalVar {
+            let uid = c.add_program_global_var(ir::GlobalVar {
                 token: v.name,
                 ty: convert_types(&v.r#type),
                 is_vec: v.is_vec,
             });
+            local_name_space.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
         }
 
         if !module.execs.is_empty() {
@@ -64,48 +57,45 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<ir::Program<'src>, Ap
     }
     for module in c.modules.borrow().values() {
         for f in &module.funcs {
-            let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
+            let ir::Names::Func(uid) = *local_name_space.get(f.name.source).unwrap() else {
                 unreachable!()
             };
-            names_index.push_scope();
+            local_name_space.push_scope();
 
-            let func = &mut p.funcs[uid];
-            let mut body = Body::default();
+            let mut fbody = Body::default();
+            let func = &mut c.program.borrow_mut().funcs[uid];
             for (arg, typ) in &f.args {
                 let id = func.args.len();
                 func.args.push(arg.source);
                 let ty = convert_types(typ);
                 func.args_types.push(ty.clone());
-                let id = ir::VarId(body.vars.len());
-                names_index.insert_var_index(arg.source, ir::Names::Var(id));
-                body.vars.push(ir::Var {
+                let id = ir::VarId(fbody.vars.len());
+                local_name_space.insert_var_index(arg.source, ir::Names::Var(id));
+                fbody.vars.push(ir::Var {
                     loc: arg.loc,
                     ty,
                     is_vec: None,
                 });
             }
+            compile_stmt(c, &mut local_name_space, &mut fbody, &f.body);
+            func.body = fbody;
 
-            compile_stmt(&mut p, &mut names_index, &mut body, &f.body);
-
-            let func = &mut p.funcs[uid];
-            func.body = body;
-
-            names_index.pop_scope();
+            local_name_space.pop_scope();
         }
     }
 
-    Ok(p)
+    Ok(())
 }
 
 fn compile_stmt<'src>(
-    p: &mut ir::Program<'src>,
+    c: &Compiler<'src>,
     names_index: &mut ir::NameSpace<'src>,
     body: &mut Body<'src>,
     stmt: &ast::Stmt<'src>,
 ) {
     match stmt {
         ast::Stmt::Return { loc, expr } => {
-            let expr = expr.as_ref().map(|e| compile_expr(p, names_index, body, e));
+            let expr = expr.as_ref().map(|e| compile_expr(c, names_index, body, e));
             body.push(ir::Stmt::Return(*loc, expr));
         }
         ast::Stmt::VarDecl {
@@ -123,7 +113,7 @@ fn compile_stmt<'src>(
                 is_vec: *is_vec,
             });
             if let Some(expr) = expr {
-                let rhs = compile_expr(p, names_index, body, expr);
+                let rhs = compile_expr(c, names_index, body, expr);
                 body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
             }
         }
@@ -132,7 +122,7 @@ fn compile_stmt<'src>(
                 ast::Expr::Call { loc, caller, args } => {
                     let args = args
                         .into_iter()
-                        .map(|arg| compile_expr(p, names_index, body, arg))
+                        .map(|arg| compile_expr(c, names_index, body, arg))
                         .collect();
                     let caller = match caller.as_ref() {
                         ast::Expr::Ident(ident) => *ident,
@@ -147,16 +137,16 @@ fn compile_stmt<'src>(
                 ast::Expr::Syscall { loc, args } => {
                     let args = args
                         .into_iter()
-                        .map(|arg| compile_expr(p, names_index, body, arg))
+                        .map(|arg| compile_expr(c, names_index, body, arg))
                         .collect();
                     body.push(ir::Stmt::Syscall { result: None, args });
                 }
                 _ => {}
             };
         }
-        ast::Stmt::Assign { loc, lhs, rhs } => match compile_expr(p, names_index, body, lhs) {
+        ast::Stmt::Assign { loc, lhs, rhs } => match compile_expr(c, names_index, body, lhs) {
             ir::Expr::Var(_, id) => {
-                let rhs = compile_expr(p, names_index, body, rhs);
+                let rhs = compile_expr(c, names_index, body, rhs);
                 body.push(ir::Stmt::AssignVar {
                     loc: *loc,
                     var: id,
@@ -164,18 +154,18 @@ fn compile_stmt<'src>(
                 });
             }
             ir::Expr::Global(token, id) => {
-                let rhs = compile_expr(p, names_index, body, rhs);
+                let rhs = compile_expr(c, names_index, body, rhs);
                 body.push(ir::Stmt::AssignGlobalVar {
                     var: (token, id),
                     rhs,
                 });
             }
             target @ ir::Expr::Deref(loc, id) => {
-                let rhs = compile_expr(p, names_index, body, rhs);
+                let rhs = compile_expr(c, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
             target @ ir::Expr::GlobalDeref(loc, id) => {
-                let rhs = compile_expr(p, names_index, body, rhs);
+                let rhs = compile_expr(c, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
             _ => unreachable!(),
@@ -189,9 +179,9 @@ fn compile_stmt<'src>(
             let cond_id = body.next_block();
             body.push(ir::Stmt::Jmp(cond_id));
             body.push_block(body_id);
-            compile_stmt(p, names_index, body, while_body);
+            compile_stmt(c, names_index, body, while_body);
             body.push_block(cond_id);
-            let jnz = ir::Stmt::JNZ(compile_expr(p, names_index, body, cond), body_id);
+            let jnz = ir::Stmt::JNZ(compile_expr(c, names_index, body, cond), body_id);
             body.push(jnz);
         }
         ast::Stmt::If {
@@ -204,13 +194,13 @@ fn compile_stmt<'src>(
             let else_branch_id = body.next_block();
             let after_branch_id = body.next_block();
 
-            let jz = ir::Stmt::JZ(compile_expr(p, names_index, body, cond), else_branch_id);
+            let jz = ir::Stmt::JZ(compile_expr(c, names_index, body, cond), else_branch_id);
             body.push(jz);
-            compile_stmt(p, names_index, body, true_branch);
+            compile_stmt(c, names_index, body, true_branch);
             if let Some(else_branch) = else_branch {
                 body.push(ir::Stmt::Jmp(after_branch_id));
                 body.push_block(else_branch_id);
-                compile_stmt(p, names_index, body, else_branch);
+                compile_stmt(c, names_index, body, else_branch);
                 body.push_block(after_branch_id);
             } else {
                 body.push_block(else_branch_id);
@@ -219,7 +209,7 @@ fn compile_stmt<'src>(
         ast::Stmt::Block(loc, stmts) => {
             names_index.push_scope();
             for stmt in stmts {
-                compile_stmt(p, names_index, body, stmt);
+                compile_stmt(c, names_index, body, stmt);
             }
             names_index.pop_scope();
         }
@@ -227,7 +217,7 @@ fn compile_stmt<'src>(
 }
 
 fn compile_expr<'src>(
-    p: &ir::Program<'src>,
+    c: &Compiler<'src>,
     names_index: &ir::NameSpace<'src>,
     body: &mut Body<'src>,
 
@@ -254,7 +244,7 @@ fn compile_expr<'src>(
             }
             _ => todo!(),
         },
-        ast::Expr::Deref(loc, expr) => match compile_expr(p, names_index, body, expr) {
+        ast::Expr::Deref(loc, expr) => match compile_expr(c, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
             ir::Expr::StrLit(token) => {
                 let unescape = token.unescape();
@@ -263,7 +253,7 @@ fn compile_expr<'src>(
             ir::Expr::Global(token, uid) => ir::Expr::GlobalDeref(token, uid),
             _ => todo!(),
         },
-        ast::Expr::Ref(loc, expr) => match compile_expr(p, names_index, body, expr) {
+        ast::Expr::Ref(loc, expr) => match compile_expr(c, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Ref(loc, var_id),
             _ => todo!(),
         },
@@ -271,12 +261,13 @@ fn compile_expr<'src>(
             let id = ir::VarId(body.vars.len());
             let args = args
                 .into_iter()
-                .map(|arg| compile_expr(p, names_index, body, arg))
+                .map(|arg| compile_expr(c, names_index, body, arg))
                 .collect();
             let (caller, ty) = match caller.as_ref() {
                 ast::Expr::Ident(ident) => {
                     let ty = match names_index.get(ident.source) {
-                        Some(ir::Names::Func(uid)) => p.funcs[*uid].ret_type.clone(),
+                        Some(ir::Names::Func(uid)) => c.get_program_funcs()[*uid].ret_type.clone(),
+                        Some(ir::Names::ExternFunc(uid)) => c.get_program_externs()[*uid].ret.clone(),
                         _ => todo!(),
                     };
                     (*ident, ty)
@@ -300,7 +291,7 @@ fn compile_expr<'src>(
         ast::Expr::Syscall { loc, args } => {
             let args = args
                 .into_iter()
-                .map(|arg| compile_expr(p, names_index, body, arg))
+                .map(|arg| compile_expr(c, names_index, body, arg))
                 .collect();
 
             let id = ir::VarId(body.vars.len());
@@ -320,14 +311,15 @@ fn compile_expr<'src>(
         ast::Expr::Binop { operator, lhs, rhs } => {
             let loc = operator.loc;
 
-            let lhs = compile_expr(p, names_index, body, lhs);
-            let rhs = compile_expr(p, names_index, body, rhs);
+            let lhs = compile_expr(c, names_index, body, lhs);
+            let rhs = compile_expr(c, names_index, body, rhs);
 
             let id = ir::VarId(body.vars.len());
             let ty = match operator.kind {
                 TokenKind::Plus | TokenKind::Minus => {
-                    let lhs_ty = type_of_expr(&lhs, &p.global_vars, &body.vars).unwrap();
-                    let rhs_ty = type_of_expr(&rhs, &p.global_vars, &body.vars).unwrap();
+                    let global_vars = c.get_program_global_vars();
+                    let lhs_ty = type_of_expr(&lhs, global_vars, &body.vars).unwrap();
+                    let rhs_ty = type_of_expr(&rhs, global_vars, &body.vars).unwrap();
                     if matches!(lhs_ty, ir::Type::PtrTo(_)) {
                         lhs_ty
                     } else if matches!(rhs_ty, ir::Type::PtrTo(_)) {
