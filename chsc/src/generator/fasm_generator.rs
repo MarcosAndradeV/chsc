@@ -5,7 +5,7 @@ use crate::{
         Value,
     },
     ir::*,
-    utils::AppError,
+    utils::AppError, Compiler,
 };
 
 macro_rules! anno_asm {
@@ -27,14 +27,17 @@ macro_rules! raw_instr {
 
 
 
-pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
+pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
     let mut m = Module::new(use_c);
+    let p = c.program.borrow();
 
-    for r#extern in ast.externs {
-        m.push_extrn(r#extern.name.source);
+    for r#extern in &p.externs {
+        if r#extern.used {
+            m.push_extrn(r#extern.name.source);
+        }
     }
 
-    for global_var in &ast.global_vars {
+    for global_var in &p.global_vars {
         let size = if let Some(sz) = global_var.is_vec {
             global_var.ty.size() * sz
         } else {
@@ -47,7 +50,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
         ));
     }
 
-    for func in ast.funcs {
+    for func in &p.funcs {
         if !func.used {continue;}
         let mut f = Function::new(m.link_with_c, func.name.source);
 
@@ -82,18 +85,18 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
         let mut ctx = GenCtx {
             f: &mut f,
             m: &mut m,
-            global_vars: &ast.global_vars,
+            global_vars: &p.global_vars,
             vars: &func.body.vars,
             args_types: &func.args_types,
             offets: &offsets,
         };
 
-        for stmt in func.body.stmts {
+        for stmt in &func.body.stmts {
             match stmt {
                 Stmt::Return(loc, expr) => {
                     anno_asm!(anno, ctx.f, "Return@{loc}");
                     if let Some(expr) = expr {
-                        mov_to_reg(&mut ctx, expr, Register::Rax);
+                        mov_to_reg(&mut ctx, &expr, Register::Rax);
                     }
                     ctx.f.push_raw_instr("mov rsp, rbp");
                     ctx.f.push_raw_instr("pop rbp");
@@ -106,7 +109,7 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                 } => {
                     let r = Register::Rax;
                     mov_to_reg(&mut ctx, rhs, r);
-                    let offset = ctx.get_offset(id);
+                    let offset = ctx.get_offset(*id);
                     raw_instr!(ctx.f, "mov [rbp-{offset}], {r}");
                 }
                 Stmt::Store { target, rhs } => {
@@ -114,16 +117,16 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                     mov_to_reg(&mut ctx, rhs, reg);
                     match target {
                         Expr::Deref(token, VarId(id)) => {
-                            let offset = ctx.get_offset(id);
-                            let s = size_of_type(ctx.get_type_of_var(id).get_inner());
+                            let offset = ctx.get_offset(*id);
+                            let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
                             let reg = s.register_for_size(reg);
                             raw_instr!(ctx.f, "mov rbx, [rbp-{offset}]");
                             raw_instr!(ctx.f, "mov {s} [rbx], {reg}");
                         }
                         Expr::GlobalDeref(token, uid) => {
-                            let s = size_of_type(&ctx.global_vars[uid].ty);
+                            let s = size_of_type(&ctx.global_vars[*uid].ty);
                             let reg = s.register_for_size(reg);
-                            if ctx.global_vars[uid].is_vec.is_some() {
+                            if ctx.global_vars[*uid].is_vec.is_some() {
                                 raw_instr!(ctx.f, "mov rbx, _{token}");
                             } else {
                                 raw_instr!(ctx.f, "mov rbx, [_{token}]");
@@ -136,9 +139,9 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                 Stmt::AssignGlobalVar { var:(token, uid), rhs } => {
                     let reg = Register::Rax;
                     mov_to_reg(&mut ctx, rhs, reg);
-                    let s = size_of_type(&ctx.global_vars[uid].ty);
+                    let s = size_of_type(&ctx.global_vars[*uid].ty);
                     let reg = s.register_for_size(reg);
-                    if ctx.global_vars[uid].is_vec.is_some() {
+                    if ctx.global_vars[*uid].is_vec.is_some() {
                         raw_instr!(ctx.f, "mov _{token}, {reg}");
                     } else {
                         raw_instr!(ctx.f, "mov [_{token}], {reg}");
@@ -155,8 +158,8 @@ pub fn generate(ast: Program, use_c: bool) -> Result<Module, AppError> {
                     lhs,
                     rhs,
                 } => {
-                    let offset = ctx.get_offset(id);
-                    let sty = size_of_type(ctx.get_type_of_var(id));
+                    let offset = ctx.get_offset(*id);
+                    let sty = size_of_type(ctx.get_type_of_var(*id));
                     let l = Register::Rax;
                     let r = Register::Rbx;
                     let mut out = l;
@@ -368,25 +371,25 @@ impl GenCtx<'_, '_> {
     }
 }
 
-fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), AppError> {
+fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), AppError> {
     match expr {
         Expr::IntLit(loc, lit) => {
             raw_instr!(ctx.f, "mov {reg}, {lit}");
             Ok(())
         }
         Expr::CharLit(loc, lit) => {
-            let lit = lit as i32;
+            let lit = *lit as i32;
             raw_instr!(ctx.f, "mov {reg}, {lit}");
             Ok(())
         }
         Expr::Var(token, VarId(id)) => {
-            let offset = ctx.get_offset(id);
+            let offset = ctx.get_offset(*id);
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
             Ok(())
         }
         Expr::Arg(token, id) => {
             let call_convention = Register::get_call_convention();
-            if id > call_convention.len() {
+            if *id > call_convention.len() {
                 return Err(AppError::GenerationError(
                     Some(
                         "Functions with more than 6 arguments are not supported yet."
@@ -396,7 +399,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
                 ));
             }
 
-            let arg_reg = call_convention[id];
+            let arg_reg = call_convention[*id];
             if reg != arg_reg {
                 raw_instr!(ctx.f, "mov {reg}, {arg_reg}");
             }
@@ -415,7 +418,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
             Ok(())
         }
         Expr::Global(token, uid) => {
-            if ctx.global_vars[uid].is_vec.is_some() {
+            if ctx.global_vars[*uid].is_vec.is_some() {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [_{token}]");
@@ -423,8 +426,8 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
             Ok(())
         }
         Expr::Deref(token, VarId(id)) => {
-            let offset = ctx.get_offset(id);
-            let s = size_of_type(ctx.get_type_of_var(id).get_inner());
+            let offset = ctx.get_offset(*id);
+            let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
             match s {
                 SizeOperator::Byte => {
@@ -443,12 +446,12 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: Expr<'_>, reg: Register) -> Result<(), App
             Ok(())
         }
         Expr::Ref(token, VarId(id)) => {
-            let offset = ctx.get_offset(id);
+            let offset = ctx.get_offset(*id);
             raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
             Ok(())
         }
         Expr::GlobalDeref(token, uid) => {
-            let global_var = &ctx.global_vars[uid];
+            let global_var = &ctx.global_vars[*uid];
             if global_var.is_vec.is_some() {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
