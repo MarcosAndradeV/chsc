@@ -4,11 +4,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
-use arena::Arena;
 use ir::{Body, Func, Program, Stmt};
 
 use crate::ast::{Module, Name};
+use crate::ir::{ExternFunc, GlobalVar};
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
@@ -22,7 +23,6 @@ mod lower_ast;
 mod parser;
 mod type_checker;
 
-mod arena;
 mod utils;
 
 fn main() {
@@ -67,14 +67,28 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
     let file_path = c.add_file_path(file_path);
     let source = c.read_source_file(&file_path)?.unwrap();
 
-    parse_module(&c, &file_path, &source)?;
+    parse_module(c, &file_path, &source)?;
 
-    let mut program_ir = lower_ast_to_ir(&c).unwrap();
+    lower_ast_to_ir(c)?;
     // type_checker::check(&program_ir);
     let mut used_func = vec![];
-    mark_used(&program_ir, &mut used_func, "main");
+    mark_used(&c.program.borrow(), &mut used_func, "main");
     for name in used_func {
-        if let Some(f) = program_ir.funcs.iter_mut().find(|f| f.name.source == name) {
+        if let Some(f) = c
+            .program
+            .borrow_mut()
+            .funcs
+            .iter_mut()
+            .find(|f| f.name.source == name)
+        {
+            f.used = true;
+        } else if let Some(f) = c
+            .program
+            .borrow_mut()
+            .externs
+            .iter_mut()
+            .find(|f| f.name.source == name)
+        {
             f.used = true;
         }
     }
@@ -90,25 +104,54 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
     match parse_backend() {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
-            let asm_code = generator::fasm_generator::generate(program_ir, true).unwrap();
+            let asm_code = generator::fasm_generator::generate(c, true).unwrap();
             fs::write(&asm_path, asm_code.to_string())
                 .map_err(|e| AppError::FileError {
                     path: asm_path.to_string_lossy().to_string(),
                     error: e,
                 })
                 .unwrap();
-            run_fasm(&asm_path, &o_path).unwrap();
-            run_cc(&o_path, &exe_path, &["-l:libchs.a", "-Lstdlib/libchs"]).unwrap();
+
+            let output = Command::new("fasm")
+                .arg(&asm_path)
+                .arg(&o_path)
+                .output()
+                .unwrap();
+
+            if !output.status.success() {
+                c.compiler_error(format!(
+                    "fasm failed: {}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))?;
+            }
+
+            let mut output = Command::new("cc")
+                .arg(&o_path)
+                .arg("-o")
+                .arg(&exe_path)
+                .arg("-l:libchs.a")
+                .arg(format!("-L{}", RUNTIME_PATH))
+                .output()
+                .unwrap();
+
+            if !output.status.success() {
+                c.compiler_error(format!(
+                    "cc failed: {}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))?;
+            }
         }
     }
 
     if run {
-        run_exe(&exe_path)
-            .inspect(|(code, stdout, stderr)| {
-                print!("{stdout}{stderr}");
-                std::process::exit(*code);
-            })
-            .unwrap();
+        let mut output = Command::new(&exe_path).output().unwrap();
+        print!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     Ok(())
@@ -127,6 +170,9 @@ fn mark_used<'src>(program_ir: &Program<'src>, used_func: &mut Vec<&'src str>, r
                 mark_used(program_ir, used_func, caller.source);
             }
         }
+    }
+    if let Some(f) = program_ir.externs.iter().find(|f| f.name.source == root) {
+        used_func.push(f.name.source);
     }
 }
 
@@ -148,7 +194,8 @@ struct Compiler<'src> {
     sources: RefCell<Vec<String>>,
     file_paths: RefCell<Vec<String>>,
     modules: RefCell<HashMap<&'src str, Module<'src>>>,
-    name_space: RefCell<HashMap<&'src str, Name<'src>>>,
+    global_name_space: RefCell<HashMap<&'src str, Name<'src>>>,
+    program: RefCell<Program<'src>>,
 }
 
 impl<'src> Compiler<'src> {
@@ -214,6 +261,39 @@ impl<'src> Compiler<'src> {
 
     fn has_module(&self, file_path: &str) -> bool {
         self.modules.borrow().contains_key(file_path)
+    }
+
+    fn add_program_extern(&self, r#extern: ExternFunc<'src>) -> usize {
+        let mut externs = &mut self.program.borrow_mut().externs;
+        let uid = externs.len();
+        externs.push(r#extern);
+        uid
+    }
+
+    fn add_program_func(&self, r#fn: Func<'src>) -> usize {
+        let mut funcs = &mut self.program.borrow_mut().funcs;
+        let uid = funcs.len();
+        funcs.push(r#fn);
+        uid
+    }
+
+    fn add_program_global_var(&self, global_var: GlobalVar<'src>) -> usize {
+        let mut global_vars = &mut self.program.borrow_mut().global_vars;
+        let uid = global_vars.len();
+        global_vars.push(global_var);
+        uid
+    }
+
+    fn get_program_global_vars(&self) -> &[GlobalVar<'src>] {
+        unsafe { &self.program.as_ptr().as_ref().unwrap().global_vars }
+    }
+
+    fn get_program_funcs(&self) -> &[Func<'src>] {
+        unsafe { &self.program.as_ptr().as_ref().unwrap().funcs }
+    }
+
+    fn get_program_externs(&self) -> &[ExternFunc<'src>] {
+        unsafe { &self.program.as_ptr().as_ref().unwrap().externs }
     }
 }
 
