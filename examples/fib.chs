@@ -1,4 +1,4 @@
-import "stdlib/libchs.chs";
+import "stdlib/io.chs";
 
 fn main() -> int {
     var a int = 0;
