@@ -1,106 +1,97 @@
 use std::cell::RefCell;
 
-use crate::ast;
 use crate::chslexer::TokenKind;
 use crate::interpreter::{Interpreter, Value};
 use crate::ir::Body;
 use crate::ir::{self, type_of_expr};
 use crate::utils::AppError;
+use crate::{Compiler, ast};
 
-pub fn lower_ast_to_ir<'src>(module: ast::Module<'src>) -> Result<ir::Program<'src>, AppError> {
+pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<ir::Program<'src>, AppError> {
     let mut p = ir::Program::default();
     let mut names_index = ir::NameSpace::default();
+
     names_index.push_scope();
-
     let mut interpreter = Interpreter::new();
-    for c in module.consts {
-        let mut body = Body::default();
-        let v = match c.expr {
-            ast::Expr::IntLit(loc, i) => i,
-            ast::Expr::Binop { operator, lhs, rhs } => {
-                let lhs = compile_expr(&mut p, &mut names_index, &mut body, *lhs);
-                let rhs = compile_expr(&mut p, &mut names_index, &mut body, *rhs);
 
-                let lhs = interpreter.eval_expr(&lhs);
-                let rhs = interpreter.eval_expr(&rhs);
+    for module in c.modules.borrow().values() {
+        for c in &module.consts {
+            let mut body = Body::default();
+            let v = match &c.expr {
+                ast::Expr::IntLit(loc, i) => *i,
+                _ => todo!(),
+            };
+            names_index.insert_var_index(c.name.source, ir::Names::Const(v));
+        }
 
-                let Value::Int(v) = Interpreter::eval_binop(&operator, lhs, rhs) else {
-                    todo!()
-                };
-                assert!(v > 0, "Implement negative literals");
-                v as u64
-            }
-            _ => todo!(),
-        };
-        names_index.insert_var_index(c.name.source, ir::Names::Const(v));
-    }
-
-    for f in module.externs {
-        let uid = p.externs.len();
-        names_index.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
-        p.externs.push(ir::ExternFunc {
-            name: f.name,
-            args: f.args.into_iter().map(convert_types).collect(),
-            is_variadic: f.is_variadic,
-            ret: f.ret_type.map(convert_types).unwrap_or_default(),
-        });
-    }
-
-    for f in &module.funcs {
-        let uid = p.funcs.len();
-        names_index.insert_var_index(f.name.source, ir::Names::Func(uid));
-        let mut func = ir::Func {
-            name: f.name,
-            ..Default::default()
-        };
-
-        func.ret_type = f.ret_type.clone().map(convert_types).unwrap_or_default();
-
-        p.funcs.push(func);
-    }
-
-    for v in module.global_vars {
-        let uid = p.global_vars.len();
-        names_index.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
-        p.global_vars.push(ir::GlobalVar {
-            token: v.name,
-            ty: convert_types(v.r#type),
-            is_vec: v.is_vec,
-        });
-    }
-
-    if !module.execs.is_empty() {
-        todo!()
-    }
-
-    for f in module.funcs {
-        let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
-            unreachable!()
-        };
-        names_index.push_scope();
-
-        let func = &mut p.funcs[uid];
-        let mut body = Body::default();
-        for (arg, typ) in f.args {
-            let id = func.args.len();
-            func.args.push(arg);
-            let ty = convert_types(typ);
-            func.args_types.push(ty.clone());
-            let id = ir::VarId(body.vars.len());
-            names_index.insert_var_index(arg.source, ir::Names::Var(id));
-            body.vars.push(ir::Var {
-                loc: arg.loc,
-                ty,
-                is_vec: None,
+        for f in &module.externs {
+            let uid = p.externs.len();
+            names_index.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
+            p.externs.push(ir::ExternFunc {
+                name: f.name,
+                args: f.args.iter().map(convert_types).collect(),
+                is_variadic: f.is_variadic,
+                ret: f.ret_type.as_ref().map(convert_types).unwrap_or_default(),
             });
         }
 
-        compile_stmt(&mut p, &mut names_index, &mut body, f.body);
+        for f in &module.funcs {
+            let uid = p.funcs.len();
+            names_index.insert_var_index(f.name.source, ir::Names::Func(uid));
+            let mut func = ir::Func {
+                name: f.name,
+                ..Default::default()
+            };
 
-        let func = &mut p.funcs[uid];
-        func.body = body;
+            func.ret_type = f.ret_type.as_ref().map(convert_types).unwrap_or_default();
 
-        names_index.pop_scope();
+            p.funcs.push(func);
+        }
+
+        for v in &module.global_vars {
+            let uid = p.global_vars.len();
+            names_index.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
+            p.global_vars.push(ir::GlobalVar {
+                token: v.name,
+                ty: convert_types(&v.r#type),
+                is_vec: v.is_vec,
+            });
+        }
+
+        if !module.execs.is_empty() {
+            todo!()
+        }
+    }
+    for module in c.modules.borrow().values() {
+        for f in &module.funcs {
+            let ir::Names::Func(uid) = *names_index.get(f.name.source).unwrap() else {
+                unreachable!()
+            };
+            names_index.push_scope();
+
+            let func = &mut p.funcs[uid];
+            let mut body = Body::default();
+            for (arg, typ) in &f.args {
+                let id = func.args.len();
+                func.args.push(arg.source);
+                let ty = convert_types(typ);
+                func.args_types.push(ty.clone());
+                let id = ir::VarId(body.vars.len());
+                names_index.insert_var_index(arg.source, ir::Names::Var(id));
+                body.vars.push(ir::Var {
+                    loc: arg.loc,
+                    ty,
+                    is_vec: None,
+                });
+            }
+
+            compile_stmt(&mut p, &mut names_index, &mut body, &f.body);
+
+            let func = &mut p.funcs[uid];
+            func.body = body;
+
+            names_index.pop_scope();
+        }
     }
 
     Ok(p)
@@ -110,12 +101,12 @@ fn compile_stmt<'src>(
     p: &mut ir::Program<'src>,
     names_index: &mut ir::NameSpace<'src>,
     body: &mut Body<'src>,
-    stmt: ast::Stmt<'src>,
+    stmt: &ast::Stmt<'src>,
 ) {
     match stmt {
         ast::Stmt::Return { loc, expr } => {
-            let expr = expr.map(|e| compile_expr(p, names_index, body, e));
-            body.push(ir::Stmt::Return(loc, expr));
+            let expr = expr.as_ref().map(|e| compile_expr(p, names_index, body, e));
+            body.push(ir::Stmt::Return(*loc, expr));
         }
         ast::Stmt::VarDecl {
             name,
@@ -129,7 +120,7 @@ fn compile_stmt<'src>(
             body.vars.push(ir::Var {
                 loc: name.loc,
                 ty: convert_types(r#type),
-                is_vec,
+                is_vec: *is_vec,
             });
             if let Some(expr) = expr {
                 let rhs = compile_expr(p, names_index, body, expr);
@@ -166,7 +157,11 @@ fn compile_stmt<'src>(
         ast::Stmt::Assign { loc, lhs, rhs } => match compile_expr(p, names_index, body, lhs) {
             ir::Expr::Var(_, id) => {
                 let rhs = compile_expr(p, names_index, body, rhs);
-                body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
+                body.push(ir::Stmt::AssignVar {
+                    loc: *loc,
+                    var: id,
+                    rhs,
+                });
             }
             ir::Expr::Global(token, id) => {
                 let rhs = compile_expr(p, names_index, body, rhs);
@@ -194,7 +189,7 @@ fn compile_stmt<'src>(
             let cond_id = body.next_block();
             body.push(ir::Stmt::Jmp(cond_id));
             body.push_block(body_id);
-            compile_stmt(p, names_index, body, *while_body);
+            compile_stmt(p, names_index, body, while_body);
             body.push_block(cond_id);
             let jnz = ir::Stmt::JNZ(compile_expr(p, names_index, body, cond), body_id);
             body.push(jnz);
@@ -211,11 +206,11 @@ fn compile_stmt<'src>(
 
             let jz = ir::Stmt::JZ(compile_expr(p, names_index, body, cond), else_branch_id);
             body.push(jz);
-            compile_stmt(p, names_index, body, *true_branch);
+            compile_stmt(p, names_index, body, true_branch);
             if let Some(else_branch) = else_branch {
                 body.push(ir::Stmt::Jmp(after_branch_id));
                 body.push_block(else_branch_id);
-                compile_stmt(p, names_index, body, *else_branch);
+                compile_stmt(p, names_index, body, else_branch);
                 body.push_block(after_branch_id);
             } else {
                 body.push_block(else_branch_id);
@@ -236,16 +231,16 @@ fn compile_expr<'src>(
     names_index: &ir::NameSpace<'src>,
     body: &mut Body<'src>,
 
-    expr: ast::Expr<'src>,
+    expr: &ast::Expr<'src>,
 ) -> ir::Expr<'src> {
     match expr {
-        ast::Expr::IntLit(loc, lit) => ir::Expr::IntLit(loc, lit),
-        ast::Expr::BoolLit(loc, lit) => ir::Expr::IntLit(loc, if lit { 1 } else { 0 }),
-        ast::Expr::StrLit(token) => ir::Expr::StrLit(token),
+        ast::Expr::IntLit(loc, lit) => ir::Expr::IntLit(*loc, *lit),
+        ast::Expr::BoolLit(loc, lit) => ir::Expr::IntLit(*loc, if *lit { 1 } else { 0 }),
+        ast::Expr::StrLit(token) => ir::Expr::StrLit(*token),
         ast::Expr::Ident(token) => match names_index.get(token.source) {
             Some(ir::Names::Var(id)) => ir::Expr::Var(token.loc, *id),
             Some(ir::Names::Arg(id)) => ir::Expr::Arg(token.loc, *id),
-            Some(ir::Names::GlobalVar(id)) => ir::Expr::Global(token, *id),
+            Some(ir::Names::GlobalVar(id)) => ir::Expr::Global(*token, *id),
             Some(ir::Names::Const(lit)) => ir::Expr::IntLit(token.loc, *lit),
             None => {
                 todo!(
@@ -259,7 +254,7 @@ fn compile_expr<'src>(
             }
             _ => todo!(),
         },
-        ast::Expr::Deref(loc, expr) => match compile_expr(p, names_index, body, *expr) {
+        ast::Expr::Deref(loc, expr) => match compile_expr(p, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
             ir::Expr::StrLit(token) => {
                 let unescape = token.unescape();
@@ -268,7 +263,7 @@ fn compile_expr<'src>(
             ir::Expr::Global(token, uid) => ir::Expr::GlobalDeref(token, uid),
             _ => todo!(),
         },
-        ast::Expr::Ref(loc, expr) => match compile_expr(p, names_index, body, *expr) {
+        ast::Expr::Ref(loc, expr) => match compile_expr(p, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Ref(loc, var_id),
             _ => todo!(),
         },
@@ -293,9 +288,9 @@ fn compile_expr<'src>(
                 caller,
                 args,
             });
-
+            let loc = *loc;
             body.vars.push(ir::Var {
-                loc: loc,
+                loc,
                 ty,
                 is_vec: None,
             });
@@ -313,9 +308,9 @@ fn compile_expr<'src>(
                 result: Some(id),
                 args,
             });
-
+            let loc = *loc;
             body.vars.push(ir::Var {
-                loc: loc,
+                loc,
                 ty: ir::Type::Int,
                 is_vec: None,
             });
@@ -325,8 +320,8 @@ fn compile_expr<'src>(
         ast::Expr::Binop { operator, lhs, rhs } => {
             let loc = operator.loc;
 
-            let lhs = compile_expr(p, names_index, body, *lhs);
-            let rhs = compile_expr(p, names_index, body, *rhs);
+            let lhs = compile_expr(p, names_index, body, lhs);
+            let rhs = compile_expr(p, names_index, body, rhs);
 
             let id = ir::VarId(body.vars.len());
             let ty = match operator.kind {
@@ -383,7 +378,7 @@ fn compile_expr<'src>(
                 }
                 _ => todo!(),
             };
-
+            let operator = *operator;
             body.push(ir::Stmt::Binop {
                 result: id,
                 operator,
@@ -404,14 +399,14 @@ fn compile_expr<'src>(
     }
 }
 
-fn convert_types(ast_type: ast::Type) -> ir::Type {
+fn convert_types(ast_type: &ast::Type) -> ir::Type {
     match ast_type {
         ast::Type::Name(token) if token.source == "int" => ir::Type::Int,
         ast::Type::Name(token) if token.source == "char" => ir::Type::Char,
         ast::Type::Name(token) if token.source == "bool" => ir::Type::Bool,
         ast::Type::Name(token) if token.source == "ptr" => ir::Type::Ptr,
         ast::Type::Name(token) if token.source == "void" => ir::Type::Void,
-        ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(*t))),
+        ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(t))),
         _ => todo!("{ast_type:?}"),
     }
 }

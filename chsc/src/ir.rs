@@ -78,7 +78,7 @@ impl<'src> Body<'src> {
 pub struct Func<'src> {
     pub used: bool,
     pub name: Token<'src>,
-    pub args: Vec<Token<'src>>,
+    pub args: Vec<&'src str>,
     pub args_types: Vec<Type>,
     pub ret_type: Type,
 
