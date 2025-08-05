@@ -1,26 +1,36 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::Compiler;
-use crate::ast::{Const, Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type};
+use crate::ast::{
+    Const, Exec, Expr, ExternFunc, Func, GlobalVar, Module, Name, Precedence, Stmt, Type,
+};
 use crate::chslexer::*;
-use crate::utils::{validate_input_file, AppError};
+use crate::utils::{AppError, validate_input_file};
 
 pub fn parse_module<'src>(
-    c: &'src Compiler,
-    imported_modules: &mut HashSet<&'src str>,
+    c: &'src Compiler<'src>,
     file_path: &'src str,
-    source: &'src String,
-) -> Result<Module<'src>, ()> {
+    source: &'src str,
+) -> Result<(), ()> {
     let mut lexer = PeekableLexer::new(file_path, source);
     lexer.set_is_keyword_fn(|s| {
         matches!(
             s,
-            "fn" | "return" | "extern" | "var" | "syscall" | "while" | "if" | "else" | "import"
-            |"const"
+            "fn" | "return"
+                | "extern"
+                | "var"
+                | "syscall"
+                | "while"
+                | "if"
+                | "else"
+                | "import"
+                | "const"
         )
     });
 
     let mut module = Module {
+        name: file_path,
         ..Default::default()
     };
 
@@ -37,53 +47,51 @@ pub fn parse_module<'src>(
             TokenKind::Keyword if token.source == "fn" => {
                 let r#fn = parse_fn(&c, &mut lexer)?;
                 let loc = r#fn.name.loc;
-                if let Some(name) = module.add_fn(r#fn) {
+                if let Some(name) = module.add_fn(r#fn, c) {
                     c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}", loc, name.get_str(&module),
+                        "{}: Redefinition of {}",
+                        loc,
+                        name.get_str(c),
                     ));
                 };
             }
             TokenKind::Keyword if token.source == "extern" => {
                 let r#extern = parse_extern_fn(c, &mut lexer)?;
                 let loc = r#extern.name.loc;
-                if let Some(name) = module.add_extern_fn(r#extern) {
+                if let Some(name) = module.add_extern_fn(r#extern, c) {
                     c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}", loc, name.get_str(&module),
+                        "{}: Redefinition of {}",
+                        loc,
+                        name.get_str(c),
                     ));
                 };
             }
             TokenKind::Keyword if token.source == "import" => {
-                let file_path = expect(c, &mut lexer, TokenKind::StringLiteral, Some("File path not provided"))?;
-                let file_path = c.strings.alloc(file_path.unescape());
-                validate_input_file(&c, &file_path)?;
+                let file_path = expect(
+                    c,
+                    &mut lexer,
+                    TokenKind::StringLiteral,
+                    Some("File path not provided"),
+                )?
+                .unescape();
                 expect(c, &mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
-                if !imported_modules.insert(file_path.as_str()) {
+                let file_path = c.add_file_path(file_path);
+                let Some(source) = c.read_source_file(&file_path)? else {
                     continue;
-                }
-                let source =
-                    std::fs::read_to_string(&file_path).unwrap();
-                let source = c.strings.alloc(source);
-                let m = parse_module(c, imported_modules, file_path, source)?;
-                for (k, v) in m.name_space {
-                    if module.name_space.insert(k, v).is_some() {
-                        todo!("Redefinition of name in imported file")
-                    }
-                }
-                module.funcs.extend(m.funcs);
-                module.global_vars.extend(m.global_vars);
-                module.consts.extend(m.consts);
-                module.externs.extend(m.externs);
-                module.execs.extend(m.execs);
+                };
+                parse_module(c, file_path, source)?;
             }
             TokenKind::Keyword if token.source == "var" => {
-                let name = expect(c,
+                let name = expect(
+                    c,
                     &mut lexer,
                     TokenKind::Identifier,
                     Some("Expected variable name"),
                 )?;
                 let is_vec = if inspect(c, &mut lexer, &[TokenKind::OpenBracket])? {
                     lexer.next_token();
-                    let sz = expect(c,
+                    let sz = expect(
+                        c,
                         &mut lexer,
                         TokenKind::IntegerNumber,
                         Some("Expected size of vector. Hint: `var xs[10];`"),
@@ -96,26 +104,33 @@ pub fn parse_module<'src>(
                 let r#type = parse_type(c, &mut lexer)?;
                 let expr = if inspect(c, &mut lexer, &[TokenKind::Assign])? {
                     lexer.next_token();
-                    let expr = parse_expr(c, &mut lexer, &[TokenKind::SemiColon], Precedence::Lowest)?;
+                    let expr =
+                        parse_expr(c, &mut lexer, &[TokenKind::SemiColon], Precedence::Lowest)?;
                     Some(expr)
                 } else {
                     None
                 };
                 expect(c, &mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 let loc = name.loc;
-                if let Some(name) = module.add_global_vars(GlobalVar {
-                    name,
-                    is_vec,
-                    r#type,
-                    expr,
-                }) {
+                if let Some(name) = module.add_global_vars(
+                    GlobalVar {
+                        name,
+                        is_vec,
+                        r#type,
+                        expr,
+                    },
+                    c,
+                ) {
                     c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}", loc, name.get_str(&module),
+                        "{}: Redefinition of {}",
+                        loc,
+                        name.get_str(c),
                     ));
                 };
             }
             TokenKind::Keyword if token.source == "const" => {
-                let name = expect(c,
+                let name = expect(
+                    c,
                     &mut lexer,
                     TokenKind::Identifier,
                     Some("Expected variable name"),
@@ -124,28 +139,39 @@ pub fn parse_module<'src>(
                 let expr = parse_expr(c, &mut lexer, &[TokenKind::SemiColon], Precedence::Lowest)?;
                 expect(c, &mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 let loc = name.loc;
-                if let Some(name) = module.add_consts(Const {
-                    name,
-                    expr
-                }) {
+                if let Some(name) = module.add_consts(Const { name, expr }, c) {
                     c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}", loc, name.get_str(&module),
+                        "{}: Redefinition of {}",
+                        loc,
+                        name.get_str(&c),
                     ));
                 };
             }
-            _ => c.compiler_error(unexpected_token(token, Some("Expected a top level definition")))?,
+            _ => c.compiler_error(unexpected_token(
+                token,
+                Some("Expected a top level definition"),
+            ))?,
         }
     }
 
-    return Ok(module);
+    c.add_module(file_path, module);
+    Ok(())
 }
 
-fn parse_extern_fn<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Result<ExternFunc<'src>, ()> {
+fn parse_extern_fn<'src>(
+    c: &'src Compiler,
+    lexer: &mut PeekableLexer<'src>,
+) -> Result<ExternFunc<'src>, ()> {
     let token = lexer.next_token();
     if token.source != "fn" {
         c.compiler_error(unexpected_token(token, Some("Expect `fn` after `extern`")))?;
     }
-    let name = expect(c, lexer, TokenKind::Identifier, Some("Expected function name"))?;
+    let name = expect(
+        c,
+        lexer,
+        TokenKind::Identifier,
+        Some("Expected function name"),
+    )?;
     let mut args = vec![];
     let mut ret_type = None;
     let mut is_variadic = false;
@@ -189,7 +215,12 @@ fn parse_extern_fn<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> 
 }
 
 fn parse_fn<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Result<Func<'src>, ()> {
-    let name = expect(c, lexer, TokenKind::Identifier, Some("Expected function name"))?;
+    let name = expect(
+        c,
+        lexer,
+        TokenKind::Identifier,
+        Some("Expected function name"),
+    )?;
     let mut args = vec![];
     let mut ret_type = None;
 
@@ -250,7 +281,12 @@ fn parse_stmt<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
         }
         TokenKind::Keyword if ptoken.source == "var" => {
             lexer.next_token();
-            let name = expect(c, lexer, TokenKind::Identifier, Some("Expected variable name"))?;
+            let name = expect(
+                c,
+                lexer,
+                TokenKind::Identifier,
+                Some("Expected variable name"),
+            )?;
             let is_vec = if inspect(c, lexer, &[TokenKind::OpenBracket])? {
                 lexer.next_token();
                 let sz = expect(
@@ -411,7 +447,10 @@ fn parse_expr<'src>(
                 args,
             }
         }
-        _ => c.compiler_error(unexpected_token(left_token, Some("This is not a valid expr!")))?,
+        _ => c.compiler_error(unexpected_token(
+            left_token,
+            Some("This is not a valid expr!"),
+        ))?,
     };
     loop {
         let ptoken = lexer.peek_token();
@@ -458,7 +497,10 @@ fn parse_expr<'src>(
     Ok(left)
 }
 
-fn collect_args<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Result<Vec<Expr<'src>>, ()> {
+fn collect_args<'src>(
+    c: &'src Compiler,
+    lexer: &mut PeekableLexer<'src>,
+) -> Result<Vec<Expr<'src>>, ()> {
     let mut args = vec![];
     loop {
         let ptoken = lexer.peek_token();
@@ -515,7 +557,8 @@ fn unexpected_token(token: Token<'_>, msg: Option<impl ToString>) -> String {
             path: token.loc.to_string(),
             error: format!("Unexpected token {}", token),
         }
-    }.to_string()
+    }
+    .to_string()
 }
 
 fn undefined<T>(token: Token<'_>) -> Result<T, AppError> {
@@ -542,7 +585,8 @@ fn unexpected_end_of_file(token: &Token<'_>) -> String {
     AppError::ParseError {
         path: token.loc.to_string(),
         error: format!("Unexpected end of file"),
-    }.to_string()
+    }
+    .to_string()
 }
 
 fn expect<'src>(

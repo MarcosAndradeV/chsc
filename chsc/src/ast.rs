@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use crate::{
+    Compiler,
     arena::Arena,
     chslexer::{Loc, Token, TokenKind},
 };
 
 #[derive(Default)]
 pub struct Module<'src> {
-    // pub name: Token<'src>,
-    pub name_space: HashMap<&'src str, Name>,
+    pub name: &'src str,
     pub externs: Vec<ExternFunc<'src>>,
 
     pub funcs: Vec<Func<'src>>,
@@ -19,32 +19,37 @@ pub struct Module<'src> {
 }
 
 impl<'src> Module<'src> {
-    pub fn add_fn(&mut self, r#fn: Func<'src>) -> Option<Name> {
+    pub fn add_fn(&mut self, r#fn: Func<'src>, c: &'src Compiler<'src>) -> Option<Name<'src>> {
         let k = r#fn.name.source;
         let len = self.funcs.len();
         self.funcs.push(r#fn);
-        self.name_space.insert(k, Name::Func(len))
+        c.name_space.borrow_mut().insert(k, Name::Func(self.name, len))
     }
-    pub fn add_extern_fn(&mut self, r#extern: ExternFunc<'src>) -> Option<Name> {
+    pub fn add_extern_fn(
+        &mut self,
+        r#extern: ExternFunc<'src>,
+        c: &'src Compiler<'src>,
+    ) -> Option<Name<'src>> {
         let k = r#extern.name.source;
         let len = self.externs.len();
         self.externs.push(r#extern);
-        self.name_space
-            .insert(k, Name::ExternFn(len))
+        c.name_space.borrow_mut().insert(k, Name::ExternFn(self.name, len))
     }
-    pub fn add_global_vars(&mut self, var: GlobalVar<'src>) -> Option<Name> {
+    pub fn add_global_vars(
+        &mut self,
+        var: GlobalVar<'src>,
+        c: &'src Compiler<'src>,
+    ) -> Option<Name<'src>> {
         let k = var.name.source;
         let len = self.global_vars.len();
         self.global_vars.push(var);
-        self.name_space
-            .insert(k, Name::GlobalVar(len))
+        c.name_space.borrow_mut().insert(k, Name::GlobalVar(self.name, len))
     }
-    pub fn add_consts(&mut self, r#const: Const<'src>) -> Option<Name> {
+    pub fn add_consts(&mut self, r#const: Const<'src>, c: &'src Compiler<'src>) -> Option<Name<'src>> {
         let k = r#const.name.source;
         let len = self.consts.len();
         self.consts.push(r#const);
-        self.name_space
-            .insert(k, Name::Const(len))
+        c.name_space.borrow_mut().insert(k, Name::Const(self.name, len))
     }
 
     pub fn add_exec(&mut self, e: Exec<'src>) {
@@ -52,20 +57,20 @@ impl<'src> Module<'src> {
     }
 }
 
-pub enum Name {
-    GlobalVar(usize),
-    Const(usize),
-    Func(usize),
-    ExternFn(usize),
+pub enum Name<'src> {
+    GlobalVar(&'src str, usize),
+    Const(&'src str, usize),
+    Func(&'src str, usize),
+    ExternFn(&'src str, usize),
 }
 
-impl Name {
-    pub fn get_str<'src>(&self, m: &'src Module) -> &'src str {
+impl<'src> Name<'src> {
+    pub fn get_str(&self, c: &'src Compiler<'src>) -> &'src str {
         match self {
-            Name::GlobalVar(id) => m.global_vars[*id].name.source,
-            Name::Const(id) => m.consts[*id].name.source,
-            Name::Func(id) => m.funcs[*id].name.source,
-            Name::ExternFn(id) => m.externs[*id].name.source,
+            Name::GlobalVar(m, id) => c.modules.borrow()[m].global_vars[*id].name.source,
+            Name::Const(m, id) => c.modules.borrow()[m].consts[*id].name.source,
+            Name::Func(m, id) => c.modules.borrow()[m].funcs[*id].name.source,
+            Name::ExternFn(m, id) => c.modules.borrow()[m].externs[*id].name.source,
         }
     }
 }
