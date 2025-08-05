@@ -49,15 +49,18 @@ struct Frame<'src> {
     ip: usize,
 }
 
+#[derive(Default)]
 pub struct Interpreter<'src> {
+    consts: Vec<Value>,
     stack: Vec<Frame<'src>>,
 }
 
 impl<'src> Interpreter<'src> {
     pub fn new() -> Self {
-        Self {
-            stack: Vec::new(),
-        }
+        Self::default()
+    }
+    pub fn push_frame(&mut self, body: &'src Body<'src>) {
+        self.stack.push(Frame { func: &body.stmts, vars: vec![], ip: 0 });
     }
 
     pub fn execute_stmt(&mut self, p: &'src Program, stmt: &Stmt<'src>) -> Result<Option<Value>, AppError> {
@@ -182,17 +185,17 @@ impl<'src> Interpreter<'src> {
         }
         return Ok(None);
     }
+
     pub fn eval_expr(&self, expr: &Expr<'src>) -> Value {
         match expr {
             Expr::IntLit(_, n) => Value::Int(*n as i64),
             Expr::StrLit(lit) => Value::Str(lit.unescape()),
             Expr::CharLit(_, c) => Value::Char(*c),
             Expr::Var(_, v) => self.current_frame().vars[v.0].clone(),
-            Expr::Deref(_, v) => self.current_frame().vars[v.0].as_deref(),
-            // Expr::Global(_, idx) => self.globals[*idx].clone(),
             _ => todo!("expr not yet implemented: {expr:?}"),
         }
     }
+
     pub fn eval_binop(op: &Token<'_>, lhs: Value, rhs: Value) -> Value {
         match (lhs, rhs) {
             (Value::Int(l), Value::Int(r)) => match op.source {
@@ -283,5 +286,15 @@ impl<'src> Interpreter<'src> {
 
     fn current_frame(&self) -> &Frame {
         self.stack.last().unwrap()
+    }
+
+    pub fn set_const(&mut self, value: Value) -> usize {
+        let id = self.consts.len();
+        self.consts.push(value);
+        id
+    }
+
+    pub fn get_const(&self, id: usize) -> &Value {
+        &self.consts[id]
     }
 }
