@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::{
     Compiler,
-    arena::Arena,
     chslexer::{Loc, Token, TokenKind},
 };
 
@@ -23,7 +22,7 @@ impl<'src> Module<'src> {
         let k = r#fn.name.source;
         let len = self.funcs.len();
         self.funcs.push(r#fn);
-        c.name_space.borrow_mut().insert(k, Name::Func(self.name, len))
+        c.global_name_space.borrow_mut().insert(k, Name::Func(self.name, len))
     }
     pub fn add_extern_fn(
         &mut self,
@@ -33,7 +32,7 @@ impl<'src> Module<'src> {
         let k = r#extern.name.source;
         let len = self.externs.len();
         self.externs.push(r#extern);
-        c.name_space.borrow_mut().insert(k, Name::ExternFn(self.name, len))
+        c.global_name_space.borrow_mut().insert(k, Name::ExternFn(self.name, len))
     }
     pub fn add_global_vars(
         &mut self,
@@ -43,13 +42,13 @@ impl<'src> Module<'src> {
         let k = var.name.source;
         let len = self.global_vars.len();
         self.global_vars.push(var);
-        c.name_space.borrow_mut().insert(k, Name::GlobalVar(self.name, len))
+        c.global_name_space.borrow_mut().insert(k, Name::GlobalVar(self.name, len))
     }
     pub fn add_consts(&mut self, r#const: Const<'src>, c: &'src Compiler<'src>) -> Option<Name<'src>> {
         let k = r#const.name.source;
         let len = self.consts.len();
         self.consts.push(r#const);
-        c.name_space.borrow_mut().insert(k, Name::Const(self.name, len))
+        c.global_name_space.borrow_mut().insert(k, Name::Const(self.name, len))
     }
 
     pub fn add_exec(&mut self, e: Exec<'src>) {

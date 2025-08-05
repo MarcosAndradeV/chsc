@@ -27,6 +27,7 @@ pub struct VarId(pub usize);
 
 #[derive(Debug)]
 pub struct ExternFunc<'src> {
+    pub used : bool,
     pub name: Token<'src>,
     pub args: Vec<Type>,
     pub is_variadic: bool,
@@ -366,11 +367,13 @@ impl Precedence {
     }
 }
 
+use crate::interpreter::Value;
 use crate::*;
 
 pub fn print_program(program: &Program) {
     for ext in &program.externs {
         let ExternFunc {
+            used:_,
             name,
             args,
             is_variadic,
