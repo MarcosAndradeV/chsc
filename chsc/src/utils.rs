@@ -5,6 +5,7 @@ use std::env;
 use crate::Compiler;
 
 pub const STDLIB_PATH: &str = "stdlib";
+pub const RUNTIME_PATH: &str = "stdlib/runtime";
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum Backend {
