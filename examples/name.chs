@@ -1,5 +1,5 @@
-import "stdlib/linux.chs";
-import "stdlib/io.chs";
+import "linux.chs";
+import "io.chs";
 
 var name[256] char;
 fn main() -> int {
