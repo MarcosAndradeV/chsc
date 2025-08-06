@@ -48,22 +48,18 @@ pub fn parse_module<'src>(
                 let r#fn = parse_fn(&c, &mut lexer)?;
                 let loc = r#fn.name.loc;
                 if let Some(name) = module.add_fn(r#fn, c) {
-                    c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}",
-                        loc,
-                        name.get_str(c),
-                    ));
+                    c.compiler_error::<()>(
+                        format!("{}: Redefinition of {}", loc, name.get_str(c),),
+                    );
                 };
             }
             TokenKind::Keyword if token.source == "extern" => {
                 let r#extern = parse_extern_fn(c, &mut lexer)?;
                 let loc = r#extern.name.loc;
                 if let Some(name) = module.add_extern_fn(r#extern, c) {
-                    c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}",
-                        loc,
-                        name.get_str(c),
-                    ));
+                    c.compiler_error::<()>(
+                        format!("{}: Redefinition of {}", loc, name.get_str(c),),
+                    );
                 };
             }
             TokenKind::Keyword if token.source == "import" => {
@@ -75,7 +71,15 @@ pub fn parse_module<'src>(
                 )?
                 .unescape();
                 expect(c, &mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
-                let file_path = c.add_file_path(file_path);
+                let file_path = match validate_input_file(c, &file_path) {
+                    Ok(_) => c.add_file_path(file_path),
+                    Err(_) => {
+                        c.diag.borrow_mut().pop();
+                        let file_path = format!("{}/{file_path}", c.stdlib_path);
+                        validate_input_file(c, &file_path)?;
+                        c.add_file_path(file_path)
+                    }
+                };
                 let Some(source) = c.read_source_file(&file_path)? else {
                     continue;
                 };
@@ -121,11 +125,9 @@ pub fn parse_module<'src>(
                     },
                     c,
                 ) {
-                    c.compiler_error::<()>(format!(
-                        "{}: Redefinition of {}",
-                        loc,
-                        name.get_str(c),
-                    ));
+                    c.compiler_error::<()>(
+                        format!("{}: Redefinition of {}", loc, name.get_str(c),),
+                    );
                 };
             }
             TokenKind::Keyword if token.source == "const" => {

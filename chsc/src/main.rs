@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, exists};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -63,6 +63,25 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
         usage();
         c.compiler_error("No input file".to_string())?
     };
+    if !exists(&c.libchs_a).expect("Can't check existence of file libchs.a") {
+        let mut output = Command::new("cc")
+            .arg("-c")
+            .arg(format!("{}/chs.c", &c.runtime_path))
+            .arg("-static")
+            .arg("-o")
+            .arg(format!("{}/libchs.a", &c.runtime_path))
+            .arg("-O3")
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            c.compiler_error(format!(
+                "cc failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ))?;
+        }
+    }
 
     let file_path = c.add_file_path(file_path);
     let source = c.read_source_file(&file_path)?.unwrap();
@@ -131,7 +150,7 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
                 .arg("-o")
                 .arg(&exe_path)
                 .arg("-l:libchs.a")
-                .arg(format!("-L{}", RUNTIME_PATH))
+                .arg(format!("-L{}", c.runtime_path))
                 .output()
                 .unwrap();
 
@@ -190,6 +209,9 @@ struct Compiler<'src> {
     backend: Backend,
     os: Os,
     arch: Arch,
+    stdlib_path: String,
+    runtime_path: String,
+    libchs_a: String,
     diag: RefCell<Vec<Diag>>,
     sources: RefCell<Vec<String>>,
     file_paths: RefCell<Vec<String>>,
@@ -200,7 +222,13 @@ struct Compiler<'src> {
 
 impl<'src> Compiler<'src> {
     fn new() -> Self {
-        Self::default()
+        let runtime_path = get_runtime_path();
+        Self {
+            libchs_a: format!("{}/libchs.a", &runtime_path),
+            stdlib_path: get_stdlib_path(),
+            runtime_path,
+            ..Default::default()
+        }
     }
 
     fn compiler_error<T>(&self, format: String) -> Result<T, ()> {
@@ -232,7 +260,12 @@ impl<'src> Compiler<'src> {
     fn add_file_path(&'src self, file_path: String) -> &'src String {
         let mut file_paths = self.file_paths.borrow_mut();
         let len = file_paths.len();
-        file_paths.push(file_path.clone());
+        file_paths.push(
+            // Using full path
+            std::fs::canonicalize(&file_path)
+                .map(|f| f.to_str().unwrap().to_string())
+                .unwrap_or(file_path),
+        );
         unsafe { file_paths.as_ptr().add(len).as_ref().unwrap() }
     }
 

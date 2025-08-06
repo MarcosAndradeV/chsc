@@ -4,8 +4,16 @@ use std::env;
 
 use crate::Compiler;
 
-pub const STDLIB_PATH: &str = "stdlib";
-pub const RUNTIME_PATH: &str = "stdlib/runtime";
+pub const DEFAULT_STDLIB_PATH: &str = "stdlib";
+pub const DEFAULT_RUNTIME_PATH: &str = "stdlib/runtime";
+
+pub fn get_stdlib_path() -> String {
+    env::var("CHS_STDLIB_PATH").unwrap_or_else(|_| DEFAULT_STDLIB_PATH.to_string())
+}
+
+pub fn get_runtime_path() -> String {
+    env::var("CHS_RUNTIME_PATH").unwrap_or_else(|_| DEFAULT_RUNTIME_PATH.to_string())
+}
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum Backend {
