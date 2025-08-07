@@ -38,7 +38,7 @@ pub struct ExternFunc<'src> {
 pub struct GlobalVar<'src> {
     pub token: Token<'src>,
     pub ty: Type,
-    pub is_vec: Option<usize>,
+    pub is_vec: bool,
     pub value: Option<ConstExpr<'src>>,
 }
 
@@ -107,6 +107,7 @@ pub enum Type {
 
     Size,
     PtrTo(Box<Self>),
+    Array(u64, Box<Self>),
 }
 
 #[derive(Debug, Clone)]
@@ -175,7 +176,7 @@ pub enum Stmt<'src> {
     Block(usize),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ConstExpr<'src> {
     IntLit(u64),
     StrLit(Token<'src>),
@@ -295,6 +296,7 @@ impl Type {
             Type::Char => 1,
             // Type::Bool => 4,
             Type::Int => 4,
+            Type::Array(n, ty) => ty.size()*(*n as usize),
             _ => 8,
         }
     }
@@ -303,6 +305,10 @@ impl Type {
             Type::PtrTo(ty) => ty.as_ref(),
             _ => self,
         }
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(..))
     }
 }
 
@@ -315,6 +321,7 @@ impl<'src> std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Void => write!(f, "void"),
             Self::PtrTo(ty) => write!(f, "*{ty}"),
+            Self::Array(n, ty) => todo!(),
         }
     }
 }

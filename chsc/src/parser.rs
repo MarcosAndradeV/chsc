@@ -92,19 +92,6 @@ pub fn parse_module<'src>(
                     TokenKind::Identifier,
                     Some("Expected variable name"),
                 )?;
-                let is_vec = if inspect(c, &mut lexer, &[TokenKind::OpenBracket])? {
-                    lexer.next_token();
-                    let sz = expect(
-                        c,
-                        &mut lexer,
-                        TokenKind::IntegerNumber,
-                        Some("Expected size of vector. Hint: `var xs[10];`"),
-                    )?;
-                    expect(c, &mut lexer, TokenKind::CloseBracket, None::<&str>)?;
-                    Some(sz.source.parse().unwrap())
-                } else {
-                    None
-                };
                 let r#type = parse_type(c, &mut lexer)?;
                 let expr = if inspect(c, &mut lexer, &[TokenKind::Assign])? {
                     lexer.next_token();
@@ -119,7 +106,6 @@ pub fn parse_module<'src>(
                 if let Some(name) = module.add_global_vars(
                     GlobalVar {
                         name,
-                        is_vec,
                         r#type,
                         expr,
                     },
@@ -518,6 +504,12 @@ fn parse_type<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
     match token.kind {
         TokenKind::Identifier => Ok(Type::Name(token)),
         TokenKind::Asterisk => Ok(Type::PtrTo(Box::new(parse_type(c, lexer)?))),
+        TokenKind::OpenBracket => {
+            let expr = parse_expr(c, lexer, &[TokenKind::CloseBracket], Precedence::Lowest)?;
+            expect(c, lexer, TokenKind::CloseBracket, None::<&str>)?;
+            let ty = parse_type(c, lexer)?;
+            Ok(Type::Array(expr, Box::new(ty)))
+        }
         _ => c.compiler_error(unexpected_token(token, Some("This is not a valid type!"))),
     }
 }

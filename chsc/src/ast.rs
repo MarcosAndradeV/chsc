@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Compiler,
-    chslexer::{Loc, Token, TokenKind},
+    chslexer::{Loc, Token, TokenKind}, Compiler
 };
 
 #[derive(Default)]
@@ -81,7 +80,6 @@ pub struct Const<'src> {
 
 pub struct GlobalVar<'src> {
     pub name: Token<'src>,
-    pub is_vec: Option<usize>,
     pub r#type: Type<'src>,
     pub expr: Option<Expr<'src>>,
 }
@@ -110,6 +108,7 @@ pub struct Func<'src> {
 pub enum Type<'src> {
     Name(Token<'src>),
     PtrTo(Box<Self>),
+    Array(Expr<'src>, Box<Self>)
 }
 
 #[derive(Debug)]
@@ -146,7 +145,7 @@ pub enum Stmt<'src> {
     Block(Loc<'src>, Vec<Self>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr<'src> {
     IntLit(Loc<'src>, u64),
     BoolLit(Loc<'src>, bool),

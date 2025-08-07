@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::chslexer::TokenKind;
 use crate::interpreter::{Interpreter, Value};
-use crate::ir::Body;
+use crate::ir::{Body, Names};
 use crate::ir::{self, type_of_expr};
 use crate::utils::AppError;
 use crate::{Compiler, ast};
@@ -14,7 +14,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
 
     for module in c.modules.borrow().values() {
         for c in module.consts.iter() {
-            let e = const_eval(&c.expr);
+            let e = const_eval(&local_name_space, &consts, &c.expr);
             let id = consts.len();
             consts.push(e);
             local_name_space.insert_var_index(c.name.source, ir::Names::Const(id));
@@ -24,9 +24,9 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
             let uid = c.add_program_extern(ir::ExternFunc {
                 used:false,
                 name: f.name,
-                args: f.args.iter().map(convert_types).collect(),
+                args: f.args.iter().map(|t| convert_types(&local_name_space, &consts,t)).collect(),
                 is_variadic: f.is_variadic,
-                ret: f.ret_type.as_ref().map(convert_types).unwrap_or_default(),
+                ret: f.ret_type.as_ref().map(|t| convert_types(&local_name_space, &consts,t)).unwrap_or_default(),
             });
             local_name_space.insert_var_index(f.name.source, ir::Names::ExternFunc(uid));
         }
@@ -34,7 +34,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
         for f in &module.funcs {
             let r#fn = ir::Func {
                 name: f.name,
-                ret_type: f.ret_type.as_ref().map(convert_types).unwrap_or_default(),
+                ret_type: f.ret_type.as_ref().map(|t| convert_types(&local_name_space, &consts,t)).unwrap_or_default(),
                 ..Default::default()
             };
             let uid = c.add_program_func(r#fn);
@@ -43,11 +43,12 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
         }
 
         for v in &module.global_vars {
+            let ty = convert_types(&local_name_space, &consts, &v.r#type);
             let uid = c.add_program_global_var(ir::GlobalVar {
                 token: v.name,
-                ty: convert_types(&v.r#type),
-                is_vec: v.is_vec,
-                value: v.expr.as_ref().map(|e| const_eval(e))
+                is_vec: ty.is_array(),
+                ty,
+                value: v.expr.as_ref().map(|e| const_eval(&local_name_space, &consts, e))
             });
             local_name_space.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
         }
@@ -68,7 +69,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
             for (arg, typ) in &f.args {
                 let id = func.args.len();
                 func.args.push(arg.source);
-                let ty = convert_types(typ);
+                let ty = convert_types(&local_name_space, &consts, typ);
                 func.args_types.push(ty.clone());
                 let id = ir::VarId(fbody.vars.len());
                 local_name_space.insert_var_index(arg.source, ir::Names::Var(id));
@@ -87,10 +88,17 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
     Ok(())
 }
 
-fn const_eval<'src>(e: &ast::Expr<'src>) -> ir::ConstExpr<'src>{
+fn const_eval<'src>(names_index: &ir::NameSpace<'src>, consts: &[ir::ConstExpr<'src>], e: &ast::Expr<'src>) -> ir::ConstExpr<'src>{
     match e {
         ast::Expr::IntLit(_, lit) => ir::ConstExpr::IntLit(*lit),
         ast::Expr::StrLit(token) => ir::ConstExpr::StrLit(*token),
+        ast::Expr::Ident(token) => {
+            if let Some(Names::Const(id)) = names_index.get(token.source) {
+                consts[*id].clone()
+            } else {
+                todo!()
+            }
+        }
         _ => todo!(),
     }
 }
@@ -117,7 +125,7 @@ fn compile_stmt<'src>(
             names_index.insert_var_index(name.source, ir::Names::Var(id));
             body.vars.push(ir::Var {
                 loc: name.loc,
-                ty: convert_types(r#type),
+                ty: convert_types(names_index, consts,r#type),
             });
             if let Some(expr) = expr {
                 let rhs = compile_expr(c,consts, names_index, body, expr);
@@ -401,14 +409,21 @@ fn compile_expr<'src>(
     }
 }
 
-fn convert_types(ast_type: &ast::Type) -> ir::Type {
+fn convert_types<'src>(names_index: &ir::NameSpace<'src>, consts: &[ir::ConstExpr<'src>],ast_type: &ast::Type) -> ir::Type {
     match ast_type {
         ast::Type::Name(token) if token.source == "int" => ir::Type::Int,
         ast::Type::Name(token) if token.source == "char" => ir::Type::Char,
         ast::Type::Name(token) if token.source == "bool" => ir::Type::Bool,
         ast::Type::Name(token) if token.source == "size" => ir::Type::Size,
         ast::Type::Name(token) if token.source == "void" => ir::Type::Void,
-        ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(t))),
+        ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(names_index, consts,t))),
+        ast::Type::Array(n, t) => {
+            let n = match const_eval(names_index, consts, n) {
+                ir::ConstExpr::IntLit(lit) => lit,
+                ir::ConstExpr::StrLit(token) => todo!(),
+            };
+            ir::Type::Array(n, Box::new(convert_types(names_index, consts,t)))
+        }
         _ => todo!("{ast_type:?}"),
     }
 }

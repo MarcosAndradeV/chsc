@@ -38,11 +38,9 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
     }
 
     for global_var in &p.global_vars {
-        let size = if let Some(sz) = global_var.is_vec {
-            global_var.ty.size() * sz
-        } else {
+        let size =
             global_var.ty.size()
-        };
+        ;
         if let Some(c) = &global_var.value {
             match c {
                 ConstExpr::IntLit(lit) => {
@@ -148,7 +146,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                         Expr::GlobalDeref(token, uid) => {
                             let s = size_of_type(&ctx.global_vars[*uid].ty);
                             let reg = s.register_for_size(reg);
-                            if ctx.global_vars[*uid].is_vec.is_some() {
+                            if ctx.global_vars[*uid].is_vec {
                                 raw_instr!(ctx.f, "mov rbx, _{token}");
                             } else {
                                 raw_instr!(ctx.f, "mov rbx, [_{token}]");
@@ -163,7 +161,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                     mov_to_reg(&mut ctx, rhs, reg);
                     let s = size_of_type(&ctx.global_vars[*uid].ty);
                     let reg = s.register_for_size(reg);
-                    if ctx.global_vars[*uid].is_vec.is_some() {
+                    if ctx.global_vars[*uid].is_vec {
                         raw_instr!(ctx.f, "mov _{token}, {reg}");
                     } else {
                         raw_instr!(ctx.f, "mov [_{token}], {reg}");
@@ -440,7 +438,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
             Ok(())
         }
         Expr::Global(token, uid) => {
-            if ctx.global_vars[*uid].is_vec.is_some() {
+            if ctx.global_vars[*uid].is_vec {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [_{token}]");
@@ -474,7 +472,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
         }
         Expr::GlobalDeref(token, uid) => {
             let global_var = &ctx.global_vars[*uid];
-            if global_var.is_vec.is_some() {
+            if global_var.is_vec {
                 raw_instr!(ctx.f, "mov {reg}, _{token}");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [_{token}]");
@@ -516,7 +514,7 @@ fn size_of_type(ty: &Type) -> SizeOperator {
         // Type::Int16 => SizeOperator::Word,
         Type::Int | Type::Bool => SizeOperator::Dword,
         Type::Size => SizeOperator::Qword,
-        Type::PtrTo(inner) => SizeOperator::Qword,
+        Type::PtrTo(_) | Type::Array(..) => SizeOperator::Qword,
         _ => todo!(),
     }
 }
