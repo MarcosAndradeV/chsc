@@ -1,6 +1,5 @@
 #![allow(unused)]
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, exists};
 use std::path::PathBuf;
@@ -212,12 +211,12 @@ struct Compiler<'src> {
     stdlib_path: String,
     runtime_path: String,
     libchs_a: String,
-    diag: RefCell<Vec<Diag>>,
-    sources: RefCell<Vec<String>>,
-    file_paths: RefCell<Vec<String>>,
-    modules: RefCell<HashMap<&'src str, Module<'src>>>,
-    global_name_space: RefCell<HashMap<&'src str, Name<'src>>>,
-    program: RefCell<Program<'src>>,
+    diag: MyRefCell<Vec<Diag>>,
+    sources: MyRefCell<Vec<String>>,
+    file_paths: MyRefCell<Vec<String>>,
+    modules: MyRefCell<HashMap<&'src str, Module<'src>>>,
+    global_name_space: MyRefCell<HashMap<&'src str, Name<'src>>>,
+    program: MyRefCell<Program<'src>>,
 }
 
 impl<'src> Compiler<'src> {
@@ -318,18 +317,33 @@ impl<'src> Compiler<'src> {
     }
 
     fn get_program_global_vars(&self) -> &[GlobalVar<'src>] {
-        unsafe { &self.program.as_ptr().as_ref().unwrap().global_vars }
+        unsafe { &self.program.borrow().global_vars }
     }
 
     fn get_program_funcs(&self) -> &[Func<'src>] {
-        unsafe { &self.program.as_ptr().as_ref().unwrap().funcs }
+        unsafe { &self.program.borrow().funcs }
     }
 
     fn get_program_externs(&self) -> &[ExternFunc<'src>] {
-        unsafe { &self.program.as_ptr().as_ref().unwrap().externs }
+        unsafe { &self.program.borrow().externs }
     }
 }
 
 enum Diag {
     Error(String),
+}
+
+#[derive(Default)]
+struct MyRefCell<T: Default> {
+    inner: T,
+}
+
+impl<T: Default> MyRefCell<T> {
+    fn borrow(&self) -> &T {
+        unsafe { &*(&self.inner as *const T) }
+    }
+
+    fn borrow_mut(&self) -> &mut T {
+        unsafe { ((&self.inner as *const T) as *mut T).as_mut().unwrap() }
+    }
 }
