@@ -105,7 +105,7 @@ pub enum Type {
     Bool,
     Char,
 
-    Ptr,
+    Size,
     PtrTo(Box<Self>),
 }
 
@@ -310,7 +310,7 @@ impl<'src> std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
-            Self::Ptr => write!(f, "ptr"),
+            Self::Size => write!(f, "size"),
             Self::Bool => write!(f, "bool"),
             Self::Char => write!(f, "char"),
             Self::Void => write!(f, "void"),

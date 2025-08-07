@@ -515,7 +515,7 @@ fn size_of_type(ty: &Type) -> SizeOperator {
         Type::Char => SizeOperator::Byte,
         // Type::Int16 => SizeOperator::Word,
         Type::Int | Type::Bool => SizeOperator::Dword,
-        Type::Ptr => SizeOperator::Qword,
+        Type::Size => SizeOperator::Qword,
         Type::PtrTo(inner) => SizeOperator::Qword,
         _ => todo!(),
     }

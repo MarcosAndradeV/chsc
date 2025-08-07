@@ -406,7 +406,7 @@ fn convert_types(ast_type: &ast::Type) -> ir::Type {
         ast::Type::Name(token) if token.source == "int" => ir::Type::Int,
         ast::Type::Name(token) if token.source == "char" => ir::Type::Char,
         ast::Type::Name(token) if token.source == "bool" => ir::Type::Bool,
-        ast::Type::Name(token) if token.source == "ptr" => ir::Type::Ptr,
+        ast::Type::Name(token) if token.source == "size" => ir::Type::Size,
         ast::Type::Name(token) if token.source == "void" => ir::Type::Void,
         ast::Type::PtrTo(t) => ir::Type::PtrTo(Box::new(convert_types(t))),
         _ => todo!("{ast_type:?}"),
