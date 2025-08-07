@@ -124,7 +124,6 @@ pub enum Stmt<'src> {
     },
     VarDecl {
         name: Token<'src>,
-        is_vec: Option<usize>,
         r#type: Type<'src>,
         expr: Option<Expr<'src>>,
     },

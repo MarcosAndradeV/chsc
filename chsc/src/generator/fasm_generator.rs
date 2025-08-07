@@ -43,11 +43,33 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
         } else {
             global_var.ty.size()
         };
-        m.bss.push(DataDef::new(
-            format!("_{}", global_var.token.source),
-            DataDirective::Rb,
-            vec![DataExpr::Const(size as u64)],
-        ));
+        if let Some(c) = &global_var.value {
+            match c {
+                ConstExpr::IntLit(lit) => {
+                    m.bss.push(DataDef::new(
+                        format!("_{}", global_var.token.source),
+                        DataDirective::Dd,
+                        vec![DataExpr::Const(*lit)],
+                    ));
+                }
+                ConstExpr::StrLit(token) => {
+                    m.bss.push(DataDef::new(
+                        format!("_{}", global_var.token.source),
+                        DataDirective::Db,
+                        vec![
+                            DataExpr::Str(token.unescape()),
+                            DataExpr::Const(0)
+                        ],
+                    ));
+                }
+            }
+        } else {
+            m.bss.push(DataDef::new(
+                format!("_{}", global_var.token.source),
+                DataDirective::Rb,
+                vec![DataExpr::Const(size as u64)],
+            ));
+        }
     }
 
     for func in &p.funcs {
@@ -482,14 +504,8 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
         let size = var.ty.size();
-        if let Some(sz) = var.is_vec {
-            let size = size * sz;
-            offsets[i] = offset;
-            offset += if size <= 8 { 8 } else { size };
-        } else {
-            offset += if size <= 8 { 8 } else { size };
-            offsets[i] = offset;
-        }
+        offset += if size <= 8 { 8 } else { size };
+        offsets[i] = offset;
     }
     (offset, offsets)
 }

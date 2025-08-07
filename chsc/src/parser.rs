@@ -289,19 +289,6 @@ fn parse_stmt<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
                 TokenKind::Identifier,
                 Some("Expected variable name"),
             )?;
-            let is_vec = if inspect(c, lexer, &[TokenKind::OpenBracket])? {
-                lexer.next_token();
-                let sz = expect(
-                    c,
-                    lexer,
-                    TokenKind::IntegerNumber,
-                    Some("Expected size of vector. Hint: `var xs[10];`"),
-                )?;
-                expect(c, lexer, TokenKind::CloseBracket, None::<&str>)?;
-                Some(sz.source.parse().unwrap())
-            } else {
-                None
-            };
             let r#type = parse_type(c, lexer)?;
             let expr = if inspect(c, lexer, &[TokenKind::Assign])? {
                 lexer.next_token();
@@ -317,7 +304,6 @@ fn parse_stmt<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
             expect(c, lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
             return Ok(Stmt::VarDecl {
                 name,
-                is_vec,
                 r#type,
                 expr,
             });

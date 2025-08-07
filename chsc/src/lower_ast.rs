@@ -8,16 +8,16 @@ use crate::utils::AppError;
 use crate::{Compiler, ast};
 
 pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
+    let mut consts = vec![];
     let mut local_name_space = ir::NameSpace::default();
     local_name_space.push_scope();
 
     for module in c.modules.borrow().values() {
         for c in module.consts.iter() {
-            let lit = match c.expr {
-                ast::Expr::IntLit(loc, lit) => lit,
-                _ => todo!(),
-            };
-            local_name_space.insert_var_index(c.name.source, ir::Names::Const(lit));
+            let e = const_eval(&c.expr);
+            let id = consts.len();
+            consts.push(e);
+            local_name_space.insert_var_index(c.name.source, ir::Names::Const(id));
         }
 
         for f in &module.externs {
@@ -47,6 +47,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
                 token: v.name,
                 ty: convert_types(&v.r#type),
                 is_vec: v.is_vec,
+                value: v.expr.as_ref().map(|e| const_eval(e))
             });
             local_name_space.insert_var_index(v.name.source, ir::Names::GlobalVar(uid));
         }
@@ -74,10 +75,9 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
                 fbody.vars.push(ir::Var {
                     loc: arg.loc,
                     ty,
-                    is_vec: None,
                 });
             }
-            compile_stmt(c, &mut local_name_space, &mut fbody, &f.body);
+            compile_stmt(c,&consts, &mut local_name_space, &mut fbody, &f.body);
             func.body = fbody;
 
             local_name_space.pop_scope();
@@ -87,20 +87,28 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
     Ok(())
 }
 
+fn const_eval<'src>(e: &ast::Expr<'src>) -> ir::ConstExpr<'src>{
+    match e {
+        ast::Expr::IntLit(_, lit) => ir::ConstExpr::IntLit(*lit),
+        ast::Expr::StrLit(token) => ir::ConstExpr::StrLit(*token),
+        _ => todo!(),
+    }
+}
+
 fn compile_stmt<'src>(
     c: &Compiler<'src>,
+    consts: &[ir::ConstExpr<'src>],
     names_index: &mut ir::NameSpace<'src>,
     body: &mut Body<'src>,
     stmt: &ast::Stmt<'src>,
 ) {
     match stmt {
         ast::Stmt::Return { loc, expr } => {
-            let expr = expr.as_ref().map(|e| compile_expr(c, names_index, body, e));
+            let expr = expr.as_ref().map(|e| compile_expr(c,consts, names_index, body, e));
             body.push(ir::Stmt::Return(*loc, expr));
         }
         ast::Stmt::VarDecl {
             name,
-            is_vec,
             r#type,
             expr,
         } => {
@@ -110,10 +118,9 @@ fn compile_stmt<'src>(
             body.vars.push(ir::Var {
                 loc: name.loc,
                 ty: convert_types(r#type),
-                is_vec: *is_vec,
             });
             if let Some(expr) = expr {
-                let rhs = compile_expr(c, names_index, body, expr);
+                let rhs = compile_expr(c,consts, names_index, body, expr);
                 body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
             }
         }
@@ -122,7 +129,7 @@ fn compile_stmt<'src>(
                 ast::Expr::Call { loc, caller, args } => {
                     let args = args
                         .into_iter()
-                        .map(|arg| compile_expr(c, names_index, body, arg))
+                        .map(|arg| compile_expr(c,consts, names_index, body, arg))
                         .collect();
                     let caller = match caller.as_ref() {
                         ast::Expr::Ident(ident) => *ident,
@@ -137,16 +144,16 @@ fn compile_stmt<'src>(
                 ast::Expr::Syscall { loc, args } => {
                     let args = args
                         .into_iter()
-                        .map(|arg| compile_expr(c, names_index, body, arg))
+                        .map(|arg| compile_expr(c,consts, names_index, body, arg))
                         .collect();
                     body.push(ir::Stmt::Syscall { result: None, args });
                 }
                 _ => {}
             };
         }
-        ast::Stmt::Assign { loc, lhs, rhs } => match compile_expr(c, names_index, body, lhs) {
+        ast::Stmt::Assign { loc, lhs, rhs } => match compile_expr(c,consts, names_index, body, lhs) {
             ir::Expr::Var(_, id) => {
-                let rhs = compile_expr(c, names_index, body, rhs);
+                let rhs = compile_expr(c,consts, names_index, body, rhs);
                 body.push(ir::Stmt::AssignVar {
                     loc: *loc,
                     var: id,
@@ -154,18 +161,18 @@ fn compile_stmt<'src>(
                 });
             }
             ir::Expr::Global(token, id) => {
-                let rhs = compile_expr(c, names_index, body, rhs);
+                let rhs = compile_expr(c,consts, names_index, body, rhs);
                 body.push(ir::Stmt::AssignGlobalVar {
                     var: (token, id),
                     rhs,
                 });
             }
             target @ ir::Expr::Deref(loc, id) => {
-                let rhs = compile_expr(c, names_index, body, rhs);
+                let rhs = compile_expr(c,consts, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
             target @ ir::Expr::GlobalDeref(loc, id) => {
-                let rhs = compile_expr(c, names_index, body, rhs);
+                let rhs = compile_expr(c,consts, names_index, body, rhs);
                 body.push(ir::Stmt::Store { target, rhs });
             }
             _ => unreachable!(),
@@ -179,9 +186,9 @@ fn compile_stmt<'src>(
             let cond_id = body.next_block();
             body.push(ir::Stmt::Jmp(cond_id));
             body.push_block(body_id);
-            compile_stmt(c, names_index, body, while_body);
+            compile_stmt(c,consts, names_index, body, while_body);
             body.push_block(cond_id);
-            let jnz = ir::Stmt::JNZ(compile_expr(c, names_index, body, cond), body_id);
+            let jnz = ir::Stmt::JNZ(compile_expr(c,consts, names_index, body, cond), body_id);
             body.push(jnz);
         }
         ast::Stmt::If {
@@ -194,13 +201,13 @@ fn compile_stmt<'src>(
             let else_branch_id = body.next_block();
             let after_branch_id = body.next_block();
 
-            let jz = ir::Stmt::JZ(compile_expr(c, names_index, body, cond), else_branch_id);
+            let jz = ir::Stmt::JZ(compile_expr(c,consts, names_index, body, cond), else_branch_id);
             body.push(jz);
-            compile_stmt(c, names_index, body, true_branch);
+            compile_stmt(c,consts, names_index, body, true_branch);
             if let Some(else_branch) = else_branch {
                 body.push(ir::Stmt::Jmp(after_branch_id));
                 body.push_block(else_branch_id);
-                compile_stmt(c, names_index, body, else_branch);
+                compile_stmt(c,consts, names_index, body, else_branch);
                 body.push_block(after_branch_id);
             } else {
                 body.push_block(else_branch_id);
@@ -209,7 +216,7 @@ fn compile_stmt<'src>(
         ast::Stmt::Block(loc, stmts) => {
             names_index.push_scope();
             for stmt in stmts {
-                compile_stmt(c, names_index, body, stmt);
+                compile_stmt(c,consts, names_index, body, stmt);
             }
             names_index.pop_scope();
         }
@@ -218,6 +225,7 @@ fn compile_stmt<'src>(
 
 fn compile_expr<'src>(
     c: &Compiler<'src>,
+    consts: &[ir::ConstExpr<'src>],
     names_index: &ir::NameSpace<'src>,
     body: &mut Body<'src>,
 
@@ -231,7 +239,12 @@ fn compile_expr<'src>(
             Some(ir::Names::Var(id)) => ir::Expr::Var(token.loc, *id),
             Some(ir::Names::Arg(id)) => ir::Expr::Arg(token.loc, *id),
             Some(ir::Names::GlobalVar(id)) => ir::Expr::Global(*token, *id),
-            Some(ir::Names::Const(lit)) => ir::Expr::IntLit(token.loc, *lit),
+            Some(ir::Names::Const(id)) => {
+                match &consts[*id] {
+                    ir::ConstExpr::IntLit(lit) => ir::Expr::IntLit(token.loc, *lit),
+                    ir::ConstExpr::StrLit(token) => ir::Expr::StrLit(*token),
+                }
+            },
             None => {
                 todo!(
                     "{}",
@@ -244,7 +257,7 @@ fn compile_expr<'src>(
             }
             _ => todo!(),
         },
-        ast::Expr::Deref(loc, expr) => match compile_expr(c, names_index, body, expr) {
+        ast::Expr::Deref(loc, expr) => match compile_expr(c,consts, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
             ir::Expr::StrLit(token) => {
                 let unescape = token.unescape();
@@ -253,7 +266,7 @@ fn compile_expr<'src>(
             ir::Expr::Global(token, uid) => ir::Expr::GlobalDeref(token, uid),
             _ => todo!(),
         },
-        ast::Expr::Ref(loc, expr) => match compile_expr(c, names_index, body, expr) {
+        ast::Expr::Ref(loc, expr) => match compile_expr(c,consts, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Ref(loc, var_id),
             _ => todo!(),
         },
@@ -261,7 +274,7 @@ fn compile_expr<'src>(
             let id = ir::VarId(body.vars.len());
             let args = args
                 .into_iter()
-                .map(|arg| compile_expr(c, names_index, body, arg))
+                .map(|arg| compile_expr(c,consts, names_index, body, arg))
                 .collect();
             let (caller, ty) = match caller.as_ref() {
                 ast::Expr::Ident(ident) => {
@@ -283,7 +296,6 @@ fn compile_expr<'src>(
             body.vars.push(ir::Var {
                 loc,
                 ty,
-                is_vec: None,
             });
 
             ir::Expr::Var(loc, id)
@@ -291,7 +303,7 @@ fn compile_expr<'src>(
         ast::Expr::Syscall { loc, args } => {
             let args = args
                 .into_iter()
-                .map(|arg| compile_expr(c, names_index, body, arg))
+                .map(|arg| compile_expr(c, consts, names_index, body, arg))
                 .collect();
 
             let id = ir::VarId(body.vars.len());
@@ -303,7 +315,6 @@ fn compile_expr<'src>(
             body.vars.push(ir::Var {
                 loc,
                 ty: ir::Type::Int,
-                is_vec: None,
             });
 
             ir::Expr::Var(loc, id)
@@ -311,8 +322,8 @@ fn compile_expr<'src>(
         ast::Expr::Binop { operator, lhs, rhs } => {
             let loc = operator.loc;
 
-            let lhs = compile_expr(c, names_index, body, lhs);
-            let rhs = compile_expr(c, names_index, body, rhs);
+            let lhs = compile_expr(c,consts, names_index, body, lhs);
+            let rhs = compile_expr(c,consts, names_index, body, rhs);
 
             let id = ir::VarId(body.vars.len());
             let ty = match operator.kind {
@@ -381,7 +392,6 @@ fn compile_expr<'src>(
             body.vars.push(ir::Var {
                 loc,
                 ty,
-                is_vec: None,
             });
             ir::Expr::Var(loc, id)
         }

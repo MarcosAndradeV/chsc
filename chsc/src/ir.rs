@@ -14,7 +14,7 @@ pub enum Names {
     ExternFunc(usize),
     Func(usize),
     GlobalVar(usize),
-    Const(u64),
+    Const(usize),
     Var(VarId),
     Arg(usize),
 }
@@ -39,13 +39,13 @@ pub struct GlobalVar<'src> {
     pub token: Token<'src>,
     pub ty: Type,
     pub is_vec: Option<usize>,
+    pub value: Option<ConstExpr<'src>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Var<'src> {
     pub loc: Loc<'src>,
     pub ty: Type,
-    pub is_vec: Option<usize>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -175,6 +175,12 @@ pub enum Stmt<'src> {
     Block(usize),
 }
 
+#[derive(Debug)]
+pub enum ConstExpr<'src> {
+    IntLit(u64),
+    StrLit(Token<'src>),
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr<'src> {
     Void(Loc<'src>),
@@ -243,8 +249,8 @@ impl<'src> NameSpace<'src> {
 }
 
 impl<'src> Var<'src> {
-    pub fn new(loc: Loc<'src>, ty: Type, is_vec: Option<usize>) -> Self {
-        Self { loc, ty, is_vec }
+    pub fn new(loc: Loc<'src>, ty: Type) -> Self {
+        Self { loc, ty }
     }
 }
 
