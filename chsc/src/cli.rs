@@ -34,14 +34,14 @@ impl Cli {
             match arg.as_str() {
                 "-v" | "--version" => {
                     cli.version = true;
+                    return Some(cli);
                 }
                 "-h" | "--help" => {
                     cli.help = true;
-                    break;
+                    return Some(cli);
                 }
                 "-r" | "--run" => {
                     cli.run = true;
-                    break;
                 }
                 flag if flag.starts_with("-") => {
                     cli.usage();
@@ -50,15 +50,12 @@ impl Cli {
                 }
                 _ => {
                     cli.input_path = arg;
-                }
+                    break;
+                },
             }
         }
 
-        if let Some(arg) = args.next() {
-            cli.usage();
-            println!("Error: Unknow argument {arg}");
-            return None;
-        } else if cli.input_path.is_empty() {
+        if cli.input_path.is_empty() {
             cli.usage();
             println!("Error: No input file");
             return None;
