@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 
 use crate::chslexer::TokenKind;
-use crate::interpreter::{Interpreter, Value};
 use crate::ir::{Body, Names};
 use crate::ir::{self, type_of_expr};
 use crate::utils::AppError;
@@ -71,7 +70,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
                 func.args.push(arg.source);
                 let ty = convert_types(&local_name_space, &consts, typ);
                 func.args_types.push(ty.clone());
-                let id = ir::VarId(fbody.vars.len());
+                let id = fbody.vars.len();
                 local_name_space.insert_var_index(arg.source, ir::Names::Var(id));
                 fbody.vars.push(ir::Var {
                     loc: arg.loc,
@@ -121,7 +120,7 @@ fn compile_stmt<'src>(
             expr,
         } => {
             let loc = name.loc;
-            let id = ir::VarId(body.vars.len());
+            let id = body.vars.len();
             names_index.insert_var_index(name.source, ir::Names::Var(id));
             body.vars.push(ir::Var {
                 loc: name.loc,
@@ -279,7 +278,7 @@ fn compile_expr<'src>(
             _ => todo!(),
         },
         ast::Expr::Call { loc, caller, args } => {
-            let id = ir::VarId(body.vars.len());
+            let id = body.vars.len();
             let args = args
                 .into_iter()
                 .map(|arg| compile_expr(c,consts, names_index, body, arg))
@@ -314,7 +313,7 @@ fn compile_expr<'src>(
                 .map(|arg| compile_expr(c, consts, names_index, body, arg))
                 .collect();
 
-            let id = ir::VarId(body.vars.len());
+            let id = body.vars.len();
             body.push(ir::Stmt::Syscall {
                 result: Some(id),
                 args,
@@ -333,7 +332,7 @@ fn compile_expr<'src>(
             let lhs = compile_expr(c,consts, names_index, body, lhs);
             let rhs = compile_expr(c,consts, names_index, body, rhs);
 
-            let id = ir::VarId(body.vars.len());
+            let id = body.vars.len();
             let ty = match operator.kind {
                 TokenKind::Plus | TokenKind::Minus => {
                     let global_vars = c.get_program_global_vars();

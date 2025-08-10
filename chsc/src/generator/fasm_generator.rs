@@ -123,7 +123,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                     ctx.f.push_raw_instr("ret");
                 }
                 Stmt::AssignVar {
-                    var: VarId(id),
+                    var: id,
                     rhs,
                     ..
                 } => {
@@ -136,7 +136,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                     let reg = Register::Rax;
                     mov_to_reg(&mut ctx, rhs, reg);
                     match target {
-                        Expr::Deref(token, VarId(id)) => {
+                        Expr::Deref(token, id) => {
                             let offset = ctx.get_offset(*id);
                             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
                             let reg = s.register_for_size(reg);
@@ -173,7 +173,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                     operand,
                 } => todo!(),
                 Stmt::Binop {
-                    result: VarId(id),
+                    result: id,
                     operator,
                     lhs,
                     rhs,
@@ -319,7 +319,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
 
                     raw_instr!(ctx.f, "call _{caller}");
                     if let Some(result) = result {
-                        let offset = offsets[result.0];
+                        let offset = offsets[*result];
                         raw_instr!(ctx.f, "mov [rbp-{offset}], rax");
                     }
                 }
@@ -339,7 +339,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
 
                     raw_instr!(ctx.f, "syscall");
                     if let Some(result) = result {
-                        let offset = offsets[result.0];
+                        let offset = offsets[*result];
                         raw_instr!(ctx.f, "mov [rbp-{offset}], rax");
                     }
                 }
@@ -402,7 +402,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
             raw_instr!(ctx.f, "mov {reg}, {lit}");
             Ok(())
         }
-        Expr::Var(token, VarId(id)) => {
+        Expr::Var(token, id) => {
             let offset = ctx.get_offset(*id);
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
             Ok(())
@@ -445,7 +445,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
             }
             Ok(())
         }
-        Expr::Deref(token, VarId(id)) => {
+        Expr::Deref(token, id) => {
             let offset = ctx.get_offset(*id);
             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
             raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
@@ -465,7 +465,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
 
             Ok(())
         }
-        Expr::Ref(token, VarId(id)) => {
+        Expr::Ref(token, id) => {
             let offset = ctx.get_offset(*id);
             raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
             Ok(())

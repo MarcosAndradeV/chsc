@@ -22,8 +22,7 @@ pub enum Names {
 #[derive(Debug, Default)]
 pub struct NameSpace<'src>(pub Vec<HashMap<&'src str, Names>>);
 
-#[derive(Debug, Default, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VarId(pub usize);
+pub type VarId = usize;
 
 #[derive(Debug)]
 pub struct ExternFunc<'src> {
@@ -61,19 +60,7 @@ pub struct Body<'src> {
     pub block_count: usize,
     pub stmts: Vec<Stmt<'src>>,
 }
-impl<'src> Body<'src> {
-   pub  fn push(&mut self, value: Stmt<'src>)  {
-        self.stmts.push(value);
-    }
-    pub fn push_block(&mut self, bid: usize) {
-        self.push(Stmt::Block(bid));
-    }
-    pub fn next_block(&mut self) -> usize {
-        let bid = self.block_count;
-        self.block_count += 1;
-        bid
-    }
-}
+
 
 #[derive(Debug, Default, Clone)]
 pub struct Func<'src> {
@@ -85,16 +72,7 @@ pub struct Func<'src> {
 
     pub body: Body<'src>,
 }
-impl Func<'_> {
-    pub fn push_block(&mut self, bid: usize) {
-        self.body.push(Stmt::Block(bid));
-    }
-    pub fn next_block(&mut self) -> usize {
-        let bid = self.body.block_count;
-        self.body.block_count += 1;
-        bid
-    }
-}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Type {
@@ -137,30 +115,6 @@ pub enum Stmt<'src> {
         lhs: Expr<'src>,
         rhs: Expr<'src>,
     },
-    // ArithmeticBinop {
-    //     result: VarId,
-    //     operator: Token<'src>,
-    //     lhs: Expr<'src>,
-    //     rhs: Expr<'src>,
-    // },
-    // LogicalBinop {
-    //     result: VarId,
-    //     operator: Token<'src>,
-    //     lhs: Expr<'src>,
-    //     rhs: Expr<'src>,
-    // },
-    // ComparisonBinop {
-    //     result: VarId,
-    //     operator: Token<'src>,
-    //     lhs: Expr<'src>,
-    //     rhs: Expr<'src>,
-    // },
-    // PointerArithmeticBinop {
-    //     result: VarId,
-    //     operator: Token<'src>,
-    //     lhs: Expr<'src>,
-    //     rhs: Expr<'src>,
-    // },
     Funcall {
         result: Option<VarId>,
         caller: Token<'src>,
@@ -199,6 +153,31 @@ pub enum Expr<'src> {
     GlobalDeref(Token<'src>, usize),
 }
 
+impl<'src> Body<'src> {
+   pub  fn push(&mut self, value: Stmt<'src>)  {
+        self.stmts.push(value);
+    }
+    pub fn push_block(&mut self, bid: usize) {
+        self.push(Stmt::Block(bid));
+    }
+    pub fn next_block(&mut self) -> usize {
+        let bid = self.block_count;
+        self.block_count += 1;
+        bid
+    }
+}
+
+impl Func<'_> {
+    pub fn push_block(&mut self, bid: usize) {
+        self.body.push(Stmt::Block(bid));
+    }
+    pub fn next_block(&mut self) -> usize {
+        let bid = self.body.block_count;
+        self.body.block_count += 1;
+        bid
+    }
+}
+
 pub fn type_of_expr<'src>(
     expr: &Expr<'src>,
     global_vars: &[GlobalVar<'src>],
@@ -209,14 +188,14 @@ pub fn type_of_expr<'src>(
         Expr::IntLit(..) => Ok(Type::Int),
         Expr::CharLit(..) => Ok(Type::Char),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
-        Expr::Var(token, var_id) => Ok(vars[var_id.0].ty.clone()),
+        Expr::Var(token, var_id) => Ok(vars[*var_id].ty.clone()),
         Expr::Arg(token, id) => todo!(),
         Expr::Global(token, uid) => Ok(global_vars[*uid].ty.clone()),
-        Expr::Deref(token, var_id) => match &vars[var_id.0].ty {
+        Expr::Deref(token, var_id) => match &vars[*var_id].ty {
             Type::PtrTo(t) => Ok(t.as_ref().to_owned()),
             t => todo!("{t:?}"),
         },
-        Expr::Ref(token, var_id) => Ok(Type::PtrTo(Box::new(vars[var_id.0].ty.clone()))),
+        Expr::Ref(token, var_id) => Ok(Type::PtrTo(Box::new(vars[*var_id].ty.clone()))),
         Expr::GlobalDeref(token, uid) => match &global_vars[*uid].ty {
             Type::PtrTo(t) => Ok(t.as_ref().to_owned()),
             _ => todo!(),
@@ -279,11 +258,11 @@ impl<'src> std::fmt::Display for Expr<'src> {
             Expr::IntLit(_, lit) => write!(f, "{lit}"),
             Expr::CharLit(_, lit) => write!(f, "{lit}"),
             Expr::StrLit(_) => write!(f, "@str"),
-            Expr::Var(_, VarId(id)) => write!(f, "Var({id})"),
+            Expr::Var(_, id) => write!(f, "Var({id})"),
             Expr::Arg(_, id) => write!(f, "Arg({id})"),
             Expr::Global(token, _) => write!(f, "{token}"),
-            Expr::Deref(_, VarId(id)) => write!(f, "Deref({id})"),
-            Expr::Ref(_, VarId(id)) => write!(f, "Ref({id})"),
+            Expr::Deref(_, id) => write!(f, "Deref({id})"),
+            Expr::Ref(_, id) => write!(f, "Ref({id})"),
             Expr::GlobalDeref(_, uid) => write!(f, "GlobalDeref({uid})"),
         }
     }
@@ -326,61 +305,6 @@ impl<'src> std::fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub enum Precedence {
-    Lowest = 1,
-
-    // Assignment,       // =, +=, -=, etc.
-    LogicalOr,    // ||
-    LogicalAnd,   // &&
-    BitWiseOr,    // |
-    BitWiseXor,   // ^
-    BitWiseAnd,   // &
-    Equality,     // ==, !=
-    Comparison,   // <, >, <=, >=
-    BitWiseShift, // <<, >>
-    Sum,          // +, -
-    Factor,       // *, /, %
-    RefDeref,     // &, *
-    NegNot,       // !, - (unary)
-    Call,         // function calls, array indexing, field access
-
-    Highest,
-}
-
-impl Precedence {
-    pub fn from_token_kind(kind: &TokenKind) -> Option<Precedence> {
-        use TokenKind::*;
-
-        let r = match kind {
-            // Assign => Self::Assignment,
-            DoublePipe => Self::LogicalOr,
-            DoubleAmpersand => Self::LogicalAnd,
-
-            Eq | NotEq => Self::Equality,
-            Lt | Gt | LtEq | GtEq => Self::Comparison,
-
-            Pipe => Self::BitWiseOr,
-            Caret => Self::BitWiseXor,
-            Ampersand => Self::BitWiseAnd,
-            ShiftLeft | ShiftRight => Self::BitWiseShift,
-
-            Plus | Minus => Self::Sum,
-            Asterisk | Slash | Percent => Self::Factor,
-
-            Bang | Tilde => Self::NegNot,
-
-            OpenParen | OpenBracket => Self::Call,
-
-            Caret | Ampersand => Self::RefDeref,
-
-            _ => return None,
-        };
-        Some(r)
-    }
-}
-
-use crate::interpreter::Value;
 use crate::*;
 
 pub fn print_program(program: &Program) {
@@ -436,7 +360,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
             println!("Store({}) = {};", target, rhs);
         }
         Stmt::AssignVar { var, rhs, .. } => {
-            println!("Var({}) = {};", var.0, rhs);
+            println!("Var({}) = {};", var, rhs);
         }
         Stmt::AssignGlobalVar { var, rhs } => {
             println!("GlobalVar({}) = {};", var.0, rhs);
@@ -450,7 +374,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
             operator,
             operand,
         } => {
-            println!("Var({}) = {}{};", result.0, operator, operand);
+            println!("Var({}) = {}{};", result, operator, operand);
         }
         Stmt::Binop {
             result,
@@ -458,7 +382,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
             lhs,
             rhs,
         } => {
-            println!("Var({}) = {} {} {};", result.0, lhs, operator, rhs);
+            println!("Var({}) = {} {} {};", result, lhs, operator, rhs);
         }
         Stmt::Funcall {
             result,
@@ -466,16 +390,16 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
             args,
         } => {
             if let Some(res) = result {
-                print!("Var({}) = ", res.0);
+                print!("Var({}) = ", res);
             }
             print!("{}(", caller);
             for (i, arg) in args.iter().enumerate() {
                 match arg {
                     Expr::Var(_, var_id) => {
-                        print!("Var({})", var_id.0);
+                        print!("Var({})", var_id);
                     }
                     Expr::Deref(_, var_id) => {
-                        print!("Var({})^", var_id.0);
+                        print!("Var({})^", var_id);
                     }
                     _ => {
                         print!("{}", arg);
@@ -489,7 +413,7 @@ fn print_stmt(vars: &[Var<'_>], stmt: &Stmt) {
         }
         Stmt::Syscall { result, args } => {
             if let Some(res) = result {
-                print!("Var({}) = ", res.0);
+                print!("Var({}) = ", res);
             }
             print!("syscall(");
             for (i, arg) in args.iter().enumerate() {
