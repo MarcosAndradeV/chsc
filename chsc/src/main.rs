@@ -1,15 +1,15 @@
 #![allow(unused)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{self, exists};
 use std::path::PathBuf;
 use std::process::Command;
 
-use ir::{Body, Func, Program, Stmt};
+use ir::{Func, Program};
 
 use crate::ast::{Module, Name};
 use crate::cli::Cli;
-use crate::ir::{ExternFunc, GlobalVar, print_program};
+use crate::ir::{ExternFunc, GlobalVar};
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
@@ -29,31 +29,47 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     let c = Compiler::new();
-    if let Err(err) = app(&c) {
+    if app(&c).is_err() {
         c.report_errors();
-        std::process::exit(1);
     }
 }
 
-
 fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
-    let Some(cli) = Cli::parse() else {
-        return Err(());
-    };
+    let cli = Cli::parse()?;
 
-    if cli.help {
-        cli.usage();
-        return Ok(());
+    match cli.command {
+        cli::Command::Help => {
+            cli.usage();
+            return Ok(());
+        }
+        cli::Command::Compile { input_path } => {
+            compile(c, input_path)?;
+        }
+        cli::Command::CompileRun { input_path } => {
+            let exe_path = compile(c, input_path)?;
+            run(exe_path);
+        }
+        cli::Command::Version => {
+            println!("chsc version: {VERSION}");
+            return Ok(());
+        }
     }
 
-    if cli.version {
-        println!("chsc version: {VERSION}");
-        return Ok(());
-    }
+    Ok(())
+}
 
-    let file_path = cli.input_path;
+fn run(exe_path: PathBuf) {
+    let output = Command::new(&exe_path).output().unwrap();
+    print!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn compile<'src>(c: &'src Compiler<'src>, file_path: String) -> Result<PathBuf, ()> {
     if !exists(&c.libchs_a).expect("Can't check existence of file libchs.a") {
-        let mut output = Command::new("cc")
+        let output = Command::new("cc")
             .arg("-c")
             .arg(format!("{}/chs.c", &c.runtime_path))
             .arg("-static")
@@ -71,26 +87,18 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
             ))?;
         }
     }
-
     let file_path = c.add_file_path(file_path);
     let source = c.read_source_file(&file_path)?.unwrap();
-
     parse_module(c, &file_path, &source)?;
-
     lower_ast_to_ir(c)?;
-    // type_checker::check(&program_ir);
-
     opt::strip_unused_functions(c.program.borrow_mut());
     opt::strip_unused_variables(c.program.borrow_mut());
-
     if c.has_errors() {
         return Err(());
     }
-
     let input_path = PathBuf::from(file_path);
     let o_path = input_path.with_extension("o");
     let exe_path = input_path.with_extension("");
-
     match parse_backend() {
         Backend::FASM => {
             let asm_path = input_path.with_extension("asm");
@@ -116,7 +124,7 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
                 ))?;
             }
 
-            let mut output = Command::new("cc")
+            let output = Command::new("cc")
                 .arg(&o_path)
                 .arg("-o")
                 .arg(&exe_path)
@@ -134,26 +142,7 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
             }
         }
     }
-
-    if cli.run {
-        let mut output = Command::new(&exe_path).output().unwrap();
-        print!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    Ok(())
-}
-
-fn usage() {
-    println!("Usage: chsc <input-file>");
-    println!("   or: chsc <command> [arguments]");
-    println!("Commands:");
-    println!("  run <input-file>  Compile module and run");
-    println!("  help              Print this help message");
-    println!("  version           Print version");
+    Ok(exe_path)
 }
 
 #[derive(Default)]
@@ -203,14 +192,14 @@ impl<'src> Compiler<'src> {
     }
 
     fn add_source(&'src self, source: String) -> &'src String {
-        let mut sources = self.sources.borrow_mut();
+        let sources = self.sources.borrow_mut();
         let len = sources.len();
         sources.push(source.clone());
         unsafe { sources.as_ptr().add(len).as_ref().unwrap() }
     }
 
     fn add_file_path(&'src self, file_path: String) -> &'src String {
-        let mut file_paths = self.file_paths.borrow_mut();
+        let file_paths = self.file_paths.borrow_mut();
         let len = file_paths.len();
         file_paths.push(
             // Using full path
@@ -221,17 +210,15 @@ impl<'src> Compiler<'src> {
         unsafe { file_paths.as_ptr().add(len).as_ref().unwrap() }
     }
 
-    fn report_errors(&self) -> bool {
-        let mut diag = self.diag.borrow_mut();
+    fn report_errors(&self) {
+        let diag = self.diag.borrow_mut();
         if !diag.is_empty() {
             for d in diag.drain(..) {
                 match d {
                     Diag::Error(e) => eprintln!("{e}"),
                 }
             }
-            return true;
-        } else {
-            return false;
+            std::process::exit(1);
         }
     }
 
@@ -249,36 +236,36 @@ impl<'src> Compiler<'src> {
     }
 
     fn add_program_extern(&self, r#extern: ExternFunc<'src>) -> usize {
-        let mut externs = &mut self.program.borrow_mut().externs;
+        let externs = &mut self.program.borrow_mut().externs;
         let uid = externs.len();
         externs.push(r#extern);
         uid
     }
 
     fn add_program_func(&self, r#fn: Func<'src>) -> usize {
-        let mut funcs = &mut self.program.borrow_mut().funcs;
+        let funcs = &mut self.program.borrow_mut().funcs;
         let uid = funcs.len();
         funcs.push(r#fn);
         uid
     }
 
     fn add_program_global_var(&self, global_var: GlobalVar<'src>) -> usize {
-        let mut global_vars = &mut self.program.borrow_mut().global_vars;
+        let global_vars = &mut self.program.borrow_mut().global_vars;
         let uid = global_vars.len();
         global_vars.push(global_var);
         uid
     }
 
     fn get_program_global_vars(&self) -> &[GlobalVar<'src>] {
-        unsafe { &self.program.borrow().global_vars }
+        &self.program.borrow().global_vars
     }
 
     fn get_program_funcs(&self) -> &[Func<'src>] {
-        unsafe { &self.program.borrow().funcs }
+         &self.program.borrow().funcs
     }
 
     fn get_program_externs(&self) -> &[ExternFunc<'src>] {
-        unsafe { &self.program.borrow().externs }
+      &self.program.borrow().externs
     }
 }
 
