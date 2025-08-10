@@ -43,6 +43,7 @@ pub struct GlobalVar<'src> {
 
 #[derive(Debug, Clone)]
 pub struct Var<'src> {
+    pub used: bool,
     pub loc: Loc<'src>,
     pub ty: Type,
 }
@@ -230,7 +231,7 @@ impl<'src> NameSpace<'src> {
 
 impl<'src> Var<'src> {
     pub fn new(loc: Loc<'src>, ty: Type) -> Self {
-        Self { loc, ty }
+        Self { used: false, loc, ty }
     }
 }
 
@@ -310,13 +311,13 @@ use crate::*;
 pub fn print_program(program: &Program) {
     for ext in &program.externs {
         let ExternFunc {
-            used:_,
+            used,
             name,
             args,
             is_variadic,
             ret,
         } = &ext;
-        print!("extern fn {}(", name);
+        print!("[{}] extern fn {}(", if *used {'X'}else{' '}, name);
         for (i, arg) in args.iter().enumerate() {
             print!("{}", arg);
             if i < args.len() - 1 {
@@ -337,7 +338,7 @@ pub fn print_program(program: &Program) {
 }
 
 fn print_func(func: &Func) {
-    print!("fn {}(", func.name.source);
+    print!("[{}] fn {}(", if func.used{'X'}else{' '}, func.name.source);
     for (i, _) in func.args.iter().enumerate() {
         print!("Var({i})");
         if i < func.args.len() - 1 {
@@ -345,6 +346,10 @@ fn print_func(func: &Func) {
         }
     }
     println!(") -> {:?} {{", func.ret_type);
+
+    for (id, var) in func.body.vars.iter().enumerate() {
+        println!("[{}] Var({id})", if var.used{'X'}else{' '})
+    }
 
     for stmt in &func.body.stmts {
         print_stmt(&func.body.vars, stmt);

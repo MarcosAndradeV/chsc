@@ -8,7 +8,7 @@ use std::process::Command;
 use ir::{Body, Func, Program, Stmt};
 
 use crate::ast::{Module, Name};
-use crate::ir::{ExternFunc, GlobalVar};
+use crate::ir::{print_program, ExternFunc, GlobalVar};
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
@@ -20,6 +20,7 @@ mod ir;
 mod lower_ast;
 mod parser;
 mod type_checker;
+mod opt;
 
 mod utils;
 
@@ -88,27 +89,12 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
 
     lower_ast_to_ir(c)?;
     // type_checker::check(&program_ir);
-    let mut used_func = vec![];
-    mark_used(&c.program.borrow(), &mut used_func, "main");
-    for name in used_func {
-        if let Some(f) = c
-            .program
-            .borrow_mut()
-            .funcs
-            .iter_mut()
-            .find(|f| f.name.source == name)
-        {
-            f.used = true;
-        } else if let Some(f) = c
-            .program
-            .borrow_mut()
-            .externs
-            .iter_mut()
-            .find(|f| f.name.source == name)
-        {
-            f.used = true;
-        }
-    }
+
+    opt::strip_unused_functions(c.program.borrow_mut());
+    opt::strip_unused_variables(c.program.borrow_mut());
+
+    print_program(c.program.borrow());
+
 
     if c.has_errors() {
         return Err(());
@@ -172,25 +158,6 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
     }
 
     Ok(())
-}
-
-fn mark_used<'src>(program_ir: &Program<'src>, used_func: &mut Vec<&'src str>, root: &'src str) {
-    if let Some(f) = program_ir.funcs.iter().find(|f| f.name.source == root) {
-        used_func.push(f.name.source);
-        for stmt in f.body.stmts.iter() {
-            if let Stmt::Funcall {
-                result: _,
-                caller,
-                args: _,
-            } = stmt
-            {
-                mark_used(program_ir, used_func, caller.source);
-            }
-        }
-    }
-    if let Some(f) = program_ir.externs.iter().find(|f| f.name.source == root) {
-        used_func.push(f.name.source);
-    }
 }
 
 fn usage() {

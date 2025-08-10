@@ -501,6 +501,7 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offsets = vec![0; vars.len()];
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
+        if !var.used {continue;}
         let size = var.ty.size();
         offset += if size <= 8 { 8 } else { size };
         offsets[i] = offset;

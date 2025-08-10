@@ -72,6 +72,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
                 let id = func.body.vars.len();
                 local_name_space.insert_var_index(arg.source, ir::Names::Var(id));
                 func.body.vars.push(ir::Var {
+                    used: false,
                     loc: arg.loc,
                     ty,
                 });
@@ -121,6 +122,7 @@ fn compile_stmt<'src>(
             let id = func.body.vars.len();
             names_index.insert_var_index(name.source, ir::Names::Var(id));
             func.body.vars.push(ir::Var {
+                used: false,
                 loc: name.loc,
                 ty: convert_types(names_index, consts,r#type),
             });
@@ -299,6 +301,7 @@ fn compile_expr<'src>(
             });
             let loc = *loc;
             body.vars.push(ir::Var {
+                used: false,
                 loc,
                 ty,
             });
@@ -318,6 +321,7 @@ fn compile_expr<'src>(
             });
             let loc = *loc;
             body.vars.push(ir::Var {
+                used: false,
                 loc,
                 ty: ir::Type::Int,
             });
@@ -395,6 +399,7 @@ fn compile_expr<'src>(
             });
 
             body.vars.push(ir::Var {
+                used: false,
                 loc,
                 ty,
             });
