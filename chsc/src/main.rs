@@ -8,21 +8,24 @@ use std::process::Command;
 use ir::{Body, Func, Program, Stmt};
 
 use crate::ast::{Module, Name};
-use crate::ir::{print_program, ExternFunc, GlobalVar};
+use crate::cli::Cli;
+use crate::ir::{ExternFunc, GlobalVar, print_program};
 use crate::lower_ast::lower_ast_to_ir;
 use crate::parser::parse_module;
 use crate::utils::*;
 
 mod ast;
 mod chslexer;
+mod cli;
 mod generator;
 mod ir;
 mod lower_ast;
+mod opt;
 mod parser;
 mod type_checker;
-mod opt;
-
 mod utils;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     let c = Compiler::new();
@@ -32,36 +35,23 @@ fn main() {
     }
 }
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
-    let mut args = std::env::args().skip(1);
-    let mut file_path = None;
-    let mut run = false;
+    let Some(cli) = Cli::parse() else {
+        return Err(());
+    };
 
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "help" => {
-                usage();
-                return Ok(());
-            }
-            "version" => {
-                println!("chsc version: {VERSION}");
-                return Ok(());
-            }
-            "run" => {
-                run = true;
-            }
-            input_file => {
-                file_path = Some(arg);
-            }
-        }
+    if cli.help {
+        cli.usage();
+        return Ok(());
     }
 
-    let Some(file_path) = file_path else {
-        usage();
-        c.compiler_error("No input file".to_string())?
-    };
+    if cli.version {
+        println!("chsc version: {VERSION}");
+        return Ok(());
+    }
+
+    let file_path = cli.input_path;
     if !exists(&c.libchs_a).expect("Can't check existence of file libchs.a") {
         let mut output = Command::new("cc")
             .arg("-c")
@@ -92,7 +82,6 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
 
     opt::strip_unused_functions(c.program.borrow_mut());
     opt::strip_unused_variables(c.program.borrow_mut());
-
 
     if c.has_errors() {
         return Err(());
@@ -146,7 +135,7 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
         }
     }
 
-    if run {
+    if cli.run {
         let mut output = Command::new(&exe_path).output().unwrap();
         print!(
             "{}{}",
