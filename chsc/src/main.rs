@@ -43,7 +43,8 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
             return Ok(());
         }
         cli::Command::Compile { input_path } => {
-            compile(c, input_path)?;
+            let exe_path = compile(c, input_path)?;
+            println!("Generated {}", exe_path.display());
         }
         cli::Command::CompileRun { input_path } => {
             let exe_path = compile(c, input_path)?;
