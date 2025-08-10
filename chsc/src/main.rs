@@ -93,8 +93,6 @@ fn app<'src>(c: &'src Compiler<'src>) -> Result<(), ()> {
     opt::strip_unused_functions(c.program.borrow_mut());
     opt::strip_unused_variables(c.program.borrow_mut());
 
-    print_program(c.program.borrow());
-
 
     if c.has_errors() {
         return Err(());
