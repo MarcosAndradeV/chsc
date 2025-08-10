@@ -16,7 +16,6 @@ use crate::utils::*;
 mod ast;
 mod chslexer;
 mod generator;
-mod interpreter;
 mod ir;
 mod lower_ast;
 mod parser;
