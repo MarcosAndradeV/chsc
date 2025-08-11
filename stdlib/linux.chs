@@ -10,11 +10,11 @@ const SYS_CLOSE = 3;
 const SYS_STAT  = 4;
 const SYS_EXIT  = 60;
 
-fn read(fd int, buf *char, count int) -> int {
+fn read(fd int, buf *char, count usize) -> usize {
     return syscall(SYS_READ, fd, buf, count);
 }
 
-fn write(fd int, buf *char, buf_len int) -> int {
+fn write(fd int, buf *char, buf_len usize) -> usize {
     return syscall(SYS_WRITE, fd, buf, buf_len);
 }
 

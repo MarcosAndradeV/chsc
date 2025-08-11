@@ -1,4 +1,4 @@
-fn memset(p *char, byte char, size int) -> *char {
+fn memset(p *u8, byte u8, size usize) -> *u8 {
     var i int = 0;
     while(i < size) {
         *(p + i) = byte;
@@ -7,7 +7,7 @@ fn memset(p *char, byte char, size int) -> *char {
     return p;
 }
 
-fn strlen(s *char) -> int {
+fn strlen(s *char) -> usize {
     var end *char = s;
     while((*end) != 0) {
         end = end + 1;
