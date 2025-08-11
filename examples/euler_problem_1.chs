@@ -1,6 +1,6 @@
-extern fn printf(*char, ...) -> int;
+import "io.chs";
 
-fn main() -> int {
+fn main() {
     var acc int = 0;
     var i int = 0;
     while(i < 1000) {
@@ -9,6 +9,6 @@ fn main() -> int {
         }
         i = i + 1;
     }
-    printf("The sum is: %d\n", acc);
-    return 0;
+    put_string("The sum is: ");
+    putln_int(acc);
 }
