@@ -13,4 +13,4 @@ opt-level = "z"
 
 [profile.dev]
 debug = true
-opt-level = "z"
+# opt-level = "z"
