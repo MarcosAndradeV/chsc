@@ -1,4 +1,4 @@
-import "stdlib/io.chs";
+import "io.chs";
 
 fn fib(x int) {
     var a int = 0;
