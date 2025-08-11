@@ -26,7 +26,7 @@ pub type VarId = usize;
 
 #[derive(Debug)]
 pub struct ExternFunc<'src> {
-    pub used : bool,
+    pub used: bool,
     pub name: Token<'src>,
     pub args: Vec<Type>,
     pub is_variadic: bool,
@@ -62,7 +62,6 @@ pub struct Body<'src> {
     pub stmts: Vec<Stmt<'src>>,
 }
 
-
 #[derive(Debug, Default, Clone)]
 pub struct Func<'src> {
     pub used: bool,
@@ -74,17 +73,16 @@ pub struct Func<'src> {
     pub body: Body<'src>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Type {
     #[default]
     Void,
 
-    Int,
+    SBits(u8),
+    UBits(u8),
     Bool,
     Char,
 
-    Size,
     PtrTo(Box<Self>),
     Array(u64, Box<Self>),
 }
@@ -155,7 +153,7 @@ pub enum Expr<'src> {
 }
 
 impl<'src> Body<'src> {
-   pub  fn push(&mut self, value: Stmt<'src>)  {
+    pub fn push(&mut self, value: Stmt<'src>) {
         self.stmts.push(value);
     }
     pub fn push_block(&mut self, bid: usize) {
@@ -186,7 +184,7 @@ pub fn type_of_expr<'src>(
 ) -> Result<Type, AppError> {
     match expr {
         Expr::Void(..) => Ok(Type::Void),
-        Expr::IntLit(..) => Ok(Type::Int),
+        Expr::IntLit(..) => Ok(Type::SBits(32)),
         Expr::CharLit(..) => Ok(Type::Char),
         Expr::StrLit(..) => Ok(Type::PtrTo(Box::new(Type::Char))),
         Expr::Var(token, var_id) => Ok(vars[*var_id].ty.clone()),
@@ -231,7 +229,11 @@ impl<'src> NameSpace<'src> {
 
 impl<'src> Var<'src> {
     pub fn new(loc: Loc<'src>, ty: Type) -> Self {
-        Self { used: false, loc, ty }
+        Self {
+            used: false,
+            loc,
+            ty,
+        }
     }
 }
 
@@ -274,9 +276,8 @@ impl Type {
         match self {
             Type::Void => todo!("Cannot get size of void"),
             Type::Char => 1,
-            // Type::Bool => 4,
-            Type::Int => 4,
-            Type::Array(n, ty) => ty.size()*(*n as usize),
+            Type::SBits(b) | Type::UBits(b) => *b as usize >> 3,
+            Type::Array(n, ty) => ty.size() * (*n as usize),
             _ => 8,
         }
     }
@@ -295,13 +296,13 @@ impl Type {
 impl<'src> std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Int => write!(f, "int"),
-            Self::Size => write!(f, "size"),
+            Self::SBits(b) => write!(f, "s{b}"),
+            Self::UBits(b) => write!(f, "u{b}"),
             Self::Bool => write!(f, "bool"),
             Self::Char => write!(f, "char"),
             Self::Void => write!(f, "void"),
             Self::PtrTo(ty) => write!(f, "*{ty}"),
-            Self::Array(n, ty) => todo!(),
+            Self::Array(n, ty) => write!(f, "[{n}]{ty}"),
         }
     }
 }
@@ -317,7 +318,7 @@ pub fn print_program(program: &Program) {
             is_variadic,
             ret,
         } = &ext;
-        print!("[{}] extern fn {}(", if *used {'X'}else{' '}, name);
+        print!("[{}] extern fn {}(", if *used { 'X' } else { ' ' }, name);
         for (i, arg) in args.iter().enumerate() {
             print!("{}", arg);
             if i < args.len() - 1 {
@@ -338,7 +339,11 @@ pub fn print_program(program: &Program) {
 }
 
 fn print_func(func: &Func) {
-    print!("[{}] fn {}(", if func.used{'X'}else{' '}, func.name.source);
+    print!(
+        "[{}] fn {}(",
+        if func.used { 'X' } else { ' ' },
+        func.name.source
+    );
     for (i, _) in func.args.iter().enumerate() {
         print!("Var({i})");
         if i < func.args.len() - 1 {
@@ -348,7 +353,7 @@ fn print_func(func: &Func) {
     println!(") -> {:?} {{", func.ret_type);
 
     for (id, var) in func.body.vars.iter().enumerate() {
-        println!("[{}] Var({id})", if var.used{'X'}else{' '})
+        println!("[{}] Var({id})", if var.used { 'X' } else { ' ' })
     }
 
     for stmt in &func.body.stmts {

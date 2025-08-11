@@ -512,9 +512,11 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
 fn size_of_type(ty: &Type) -> SizeOperator {
     match ty {
         Type::Char => SizeOperator::Byte,
-        // Type::Int16 => SizeOperator::Word,
-        Type::Int | Type::Bool => SizeOperator::Dword,
-        Type::Size => SizeOperator::Qword,
+        Type::SBits(8) | Type::UBits(8) => SizeOperator::Byte,
+        Type::SBits(16) | Type::UBits(16) => SizeOperator::Word,
+        Type::SBits(32) | Type::UBits(32) => SizeOperator::Dword,
+        Type::SBits(64) | Type::UBits(64) => SizeOperator::Qword,
+        Type::Bool => SizeOperator::Dword,
         Type::PtrTo(_) | Type::Array(..) => SizeOperator::Qword,
         _ => todo!(),
     }
