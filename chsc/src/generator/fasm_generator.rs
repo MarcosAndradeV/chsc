@@ -140,7 +140,11 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                             let offset = ctx.get_offset(*id);
                             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
                             let reg = s.register_for_size(reg);
-                            raw_instr!(ctx.f, "mov rbx, [rbp-{offset}]");
+                            if ctx.vars[*id].ty.is_array() {
+                                raw_instr!(ctx.f, "lea rbx, [rbp-{offset}]");
+                            } else {
+                                raw_instr!(ctx.f, "mov rbx, [rbp-{offset}]");
+                            }
                             raw_instr!(ctx.f, "mov {s} [rbx], {reg}");
                         }
                         Expr::GlobalDeref(token, uid) => {
@@ -404,7 +408,11 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
         }
         Expr::Var(token, id) => {
             let offset = ctx.get_offset(*id);
-            raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
+            if ctx.vars[*id].ty.is_array() {
+                raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
+            } else {
+                raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
+            }
             Ok(())
         }
         Expr::Arg(token, id) => {
@@ -447,8 +455,13 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
         }
         Expr::Deref(token, id) => {
             let offset = ctx.get_offset(*id);
+            let offset = ctx.get_offset(*id);
             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
-            raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
+            if ctx.vars[*id].ty.is_array() {
+                raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
+            } else {
+                raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
+            }
             match s {
                 SizeOperator::Byte => {
                     raw_instr!(ctx.f, "movzx {reg}, {s} [{reg}]");
