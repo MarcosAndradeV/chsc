@@ -49,6 +49,7 @@ pub fn strip_unused_variables<'src>(program_ir: &mut Program<'src>) {
                     mark_used_var(vars, rhs);
                 }
                 Stmt::AssignVar { loc, var, rhs } => {
+                    vars[*var].used = true;
                     mark_used_var(vars, rhs);
                 }
                 Stmt::Unop {

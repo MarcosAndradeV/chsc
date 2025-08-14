@@ -56,7 +56,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
             let ty = convert_types(&local_name_space, &consts, &v.r#type);
             let uid = c.add_program_global_var(ir::GlobalVar {
                 token: v.name,
-                is_vec: ty.is_array(),
+                is_vec: matches!(ty, ir::Type::Array(..)),
                 ty,
                 value: v
                     .expr
@@ -85,11 +85,7 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
                 func.args_types.push(ty.clone());
                 let id = func.body.vars.len();
                 local_name_space.insert_var_index(arg.source, ir::Names::Var(id));
-                func.body.vars.push(ir::Var {
-                    used: false,
-                    loc: arg.loc,
-                    ty,
-                });
+                func.body.vars.push(ir::Var::new(arg.loc, ty));
             }
             compile_stmt(c, &consts, &mut local_name_space, func, &f.body);
 
@@ -137,13 +133,12 @@ fn compile_stmt<'src>(
             let loc = name.loc;
             let id = func.body.vars.len();
             names_index.insert_var_index(name.source, ir::Names::Var(id));
-            func.body.vars.push(ir::Var {
-                used: false,
-                loc: name.loc,
-                ty: convert_types(names_index, consts, r#type),
-            });
+            func.body.vars.push(ir::Var::new(name.loc, convert_types(names_index, consts, r#type)));
             if let Some(expr) = expr {
                 let rhs = compile_expr(c, consts, names_index, &mut func.body, expr);
+                if func.body.vars[id].size > type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap().size() {
+                    todo!()
+                }
                 func.body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
             }
         }
@@ -178,6 +173,9 @@ fn compile_stmt<'src>(
             match compile_expr(c, consts, names_index, &mut func.body, lhs) {
                 ir::Expr::Var(_, id) => {
                     let rhs = compile_expr(c, consts, names_index, &mut func.body, rhs);
+                    if func.body.vars[id].size > type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap().size() {
+                        todo!()
+                    }
                     func.body.push(ir::Stmt::AssignVar {
                         loc: *loc,
                         var: id,
@@ -324,11 +322,7 @@ fn compile_expr<'src>(
                 args,
             });
             let loc = *loc;
-            body.vars.push(ir::Var {
-                used: false,
-                loc,
-                ty,
-            });
+            body.vars.push(ir::Var::new(loc, ty));
 
             ir::Expr::Var(loc, id)
         }
@@ -344,11 +338,7 @@ fn compile_expr<'src>(
                 args,
             });
             let loc = *loc;
-            body.vars.push(ir::Var {
-                used: false,
-                loc,
-                ty: ir::Type::UBits(64),
-            });
+            body.vars.push(ir::Var::new(loc, ir::Type::UBits(64)));
 
             ir::Expr::Var(loc, id)
         }
@@ -476,11 +466,7 @@ fn compile_expr<'src>(
                 rhs,
             });
 
-            body.vars.push(ir::Var {
-                used: false,
-                loc,
-                ty,
-            });
+            body.vars.push(ir::Var::new(loc, ty));
             ir::Expr::Var(loc, id)
         }
         ast::Expr::Index { loc, base, index } => {
@@ -516,6 +502,12 @@ fn convert_types<'src>(
                 ir::ConstExpr::StrLit(token) => todo!(),
             };
             ir::Type::Array(n, Box::new(convert_types(names_index, consts, t)))
+        }
+        ast::Type::Slice(t) => {
+            ir::Type::Compound(vec![
+                ir::Type::PtrTo(Box::new(convert_types(names_index, consts, t))),
+                ir::Type::UBits(64),
+            ])
         }
         _ => todo!("{ast_type:?}"),
     }

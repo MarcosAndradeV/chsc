@@ -46,6 +46,7 @@ pub struct Var<'src> {
     pub used: bool,
     pub loc: Loc<'src>,
     pub ty: Type,
+    pub size: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -85,6 +86,7 @@ pub enum Type {
 
     PtrTo(Box<Self>),
     Array(u64, Box<Self>),
+    Compound(Vec<Self>),
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +234,7 @@ impl<'src> Var<'src> {
         Self {
             used: false,
             loc,
+            size: ty.size(),
             ty,
         }
     }
@@ -278,7 +281,9 @@ impl Type {
             Type::Char => 1,
             Type::SBits(b) | Type::UBits(b) => *b as usize >> 3,
             Type::Array(n, ty) => ty.size() * (*n as usize),
-            _ => 8,
+            Type::Compound(tys) => tys.iter().fold(0, |acc, elem| acc + elem.size()),
+            Type::Bool => 4,
+            Type::PtrTo(_) => 8
         }
     }
     pub fn get_inner(&self) -> &Self {
@@ -286,10 +291,6 @@ impl Type {
             Type::PtrTo(ty) => ty.as_ref(),
             _ => self,
         }
-    }
-
-    pub fn is_array(&self) -> bool {
-        matches!(self, Self::Array(..))
     }
 }
 
@@ -303,6 +304,7 @@ impl<'src> std::fmt::Display for Type {
             Self::Void => write!(f, "void"),
             Self::PtrTo(ty) => write!(f, "*{ty}"),
             Self::Array(n, ty) => write!(f, "[{n}]{ty}"),
+            Self::Compound(..) => write!(f, "Compound"),
         }
     }
 }

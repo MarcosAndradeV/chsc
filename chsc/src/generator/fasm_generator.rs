@@ -140,7 +140,7 @@ pub fn generate(c: &Compiler, use_c: bool) -> Result<Module, AppError> {
                             let offset = ctx.get_offset(*id);
                             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
                             let reg = s.register_for_size(reg);
-                            if ctx.vars[*id].ty.is_array() {
+                            if ctx.vars[*id].size > 8 {
                                 raw_instr!(ctx.f, "lea rbx, [rbp-{offset}]");
                             } else {
                                 raw_instr!(ctx.f, "mov rbx, [rbp-{offset}]");
@@ -408,7 +408,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
         }
         Expr::Var(token, id) => {
             let offset = ctx.get_offset(*id);
-            if ctx.vars[*id].ty.is_array() {
+            if ctx.vars[*id].size > 8 {
                 raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
@@ -457,7 +457,7 @@ fn mov_to_reg(ctx: &mut GenCtx, expr: &Expr<'_>, reg: Register) -> Result<(), Ap
             let offset = ctx.get_offset(*id);
             let offset = ctx.get_offset(*id);
             let s = size_of_type(ctx.get_type_of_var(*id).get_inner());
-            if ctx.vars[*id].ty.is_array() {
+            if ctx.vars[*id].size > 8 {
                 raw_instr!(ctx.f, "lea {reg}, [rbp-{offset}]");
             } else {
                 raw_instr!(ctx.f, "mov {reg}, [rbp-{offset}]");
@@ -515,7 +515,7 @@ fn calculate_stack_offsets(vars: &[Var<'_>]) -> (usize, Vec<usize>) {
     let mut offset = 0usize;
     for (i, var) in vars.iter().enumerate() {
         if !var.used {continue;}
-        let size = var.ty.size();
+        let size = var.size;
         offset += if size <= 8 { 8 } else { size };
         offsets[i] = offset;
     }
@@ -530,7 +530,7 @@ fn size_of_type(ty: &Type) -> SizeOperator {
         Type::SBits(32) | Type::UBits(32) => SizeOperator::Dword,
         Type::SBits(64) | Type::UBits(64) => SizeOperator::Qword,
         Type::Bool => SizeOperator::Dword,
-        Type::PtrTo(_) | Type::Array(..) => SizeOperator::Qword,
+        Type::PtrTo(_) | Type::Array(..) | Type::Compound(..) => SizeOperator::Qword,
         _ => todo!(),
     }
 }

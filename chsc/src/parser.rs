@@ -103,14 +103,7 @@ pub fn parse_module<'src>(
                 };
                 expect(c, &mut lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
                 let loc = name.loc;
-                if let Some(name) = module.add_global_vars(
-                    GlobalVar {
-                        name,
-                        r#type,
-                        expr,
-                    },
-                    c,
-                ) {
+                if let Some(name) = module.add_global_vars(GlobalVar { name, r#type, expr }, c) {
                     c.compiler_error::<()>(
                         format!("{}: Redefinition of {}", loc, name.get_str(c),),
                     );
@@ -288,11 +281,7 @@ fn parse_stmt<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
                 None
             };
             expect(c, lexer, TokenKind::SemiColon, Some("Expected `;`"))?;
-            return Ok(Stmt::VarDecl {
-                name,
-                r#type,
-                expr,
-            });
+            return Ok(Stmt::VarDecl { name, r#type, expr });
         }
         TokenKind::Keyword if ptoken.source == "while" => {
             let loc = lexer.next_token().loc;
@@ -505,10 +494,16 @@ fn parse_type<'src>(c: &'src Compiler, lexer: &mut PeekableLexer<'src>) -> Resul
         TokenKind::Identifier => Ok(Type::Name(token)),
         TokenKind::Asterisk => Ok(Type::PtrTo(Box::new(parse_type(c, lexer)?))),
         TokenKind::OpenBracket => {
-            let expr = parse_expr(c, lexer, &[TokenKind::CloseBracket], Precedence::Lowest)?;
-            expect(c, lexer, TokenKind::CloseBracket, None::<&str>)?;
-            let ty = parse_type(c, lexer)?;
-            Ok(Type::Array(expr, Box::new(ty)))
+            if inspect(c, lexer, &[TokenKind::CloseBracket])? {
+                lexer.next_token();
+                let ty = parse_type(c, lexer)?;
+                Ok(Type::Slice(Box::new(ty)))
+            } else {
+                let expr = parse_expr(c, lexer, &[TokenKind::CloseBracket], Precedence::Lowest)?;
+                expect(c, lexer, TokenKind::CloseBracket, None::<&str>)?;
+                let ty = parse_type(c, lexer)?;
+                Ok(Type::Array(expr, Box::new(ty)))
+            }
         }
         _ => c.compiler_error(unexpected_token(token, Some("This is not a valid type!"))),
     }

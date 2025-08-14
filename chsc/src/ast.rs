@@ -108,7 +108,8 @@ pub struct Func<'src> {
 pub enum Type<'src> {
     Name(Token<'src>),
     PtrTo(Box<Self>),
-    Array(Expr<'src>, Box<Self>)
+    Array(Expr<'src>, Box<Self>),
+    Slice(Box<Self>),
 }
 
 #[derive(Debug)]

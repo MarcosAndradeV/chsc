@@ -70,6 +70,7 @@ fn run(exe_path: PathBuf) {
 
 fn compile<'src>(c: &'src Compiler<'src>, file_path: String) -> Result<PathBuf, ()> {
     if !exists(&c.libchs_a).expect("Can't check existence of file libchs.a") {
+        println!("Recompiling {}", c.libchs_a);
         let output = Command::new("cc")
             .arg("-c")
             .arg(format!("{}/chs.c", &c.runtime_path))
@@ -130,6 +131,7 @@ fn compile<'src>(c: &'src Compiler<'src>, file_path: String) -> Result<PathBuf, 
                 .arg("-o")
                 .arg(&exe_path)
                 .arg("-l:libchs.a")
+                .arg("-no-pie")
                 .arg(format!("-L{}", c.runtime_path))
                 .output()
                 .unwrap();
@@ -262,11 +264,11 @@ impl<'src> Compiler<'src> {
     }
 
     fn get_program_funcs(&self) -> &[Func<'src>] {
-         &self.program.borrow().funcs
+        &self.program.borrow().funcs
     }
 
     fn get_program_externs(&self) -> &[ExternFunc<'src>] {
-      &self.program.borrow().externs
+        &self.program.borrow().externs
     }
 }
 
