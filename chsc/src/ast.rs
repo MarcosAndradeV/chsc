@@ -112,6 +112,17 @@ pub enum Type<'src> {
     Slice(Box<Self>),
 }
 
+impl<'src> std::fmt::Display for Type<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Name(token) => write!(f, "{token}"),
+            Type::PtrTo(t) => write!(f, "*{t}"),
+            Type::Array(_, t) => write!(f, "[]{t}"),
+            Type::Slice(t) => write!(f, "[{t}]"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Stmt<'src> {
     Return {

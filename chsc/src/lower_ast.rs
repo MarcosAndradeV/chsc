@@ -136,8 +136,9 @@ fn compile_stmt<'src>(
             func.body.vars.push(ir::Var::new(name.loc, convert_types(names_index, consts, r#type)));
             if let Some(expr) = expr {
                 let rhs = compile_expr(c, consts, names_index, &mut func.body, expr);
-                if func.body.vars[id].size > type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap().size() {
-                    todo!()
+                let type_of_expr = type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap();
+                if func.body.vars[id].size > type_of_expr.size() {
+                    c.compiler_error::<()>(format!("{}: Variable {} with type `{}` cannot be have value `{}`", loc, name, r#type, rhs));
                 }
                 func.body.push(ir::Stmt::AssignVar { loc, var: id, rhs });
             }
@@ -173,8 +174,9 @@ fn compile_stmt<'src>(
             match compile_expr(c, consts, names_index, &mut func.body, lhs) {
                 ir::Expr::Var(_, id) => {
                     let rhs = compile_expr(c, consts, names_index, &mut func.body, rhs);
-                    if func.body.vars[id].size > type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap().size() {
-                        todo!()
+                    let type_of_expr = type_of_expr(&rhs, c.get_program_global_vars(), &func.body.vars).unwrap();
+                    if func.body.vars[id].size > type_of_expr.size() {
+                        c.compiler_error::<()>(format!("{}: Type `{}` cannot be have value `{}`", loc, func.body.vars[id].ty, rhs));
                     }
                     func.body.push(ir::Stmt::AssignVar {
                         loc: *loc,
@@ -273,19 +275,14 @@ fn compile_expr<'src>(
                 ir::ConstExpr::StrLit(token) => ir::Expr::StrLit(*token),
             },
             None => {
-                todo!(
-                    "{}",
-                    AppError::ParseError {
-                        path: token.loc.to_string(),
-                        error: format!("Undefined name `{token}`")
-                    }
-                    .to_string()
-                );
+                c.compiler_error::<()>(format!("{}: Undefined symbol {}", &token.loc, token.source));
+                ir::Expr::Void(token.loc)
             }
             _ => todo!(),
         },
         ast::Expr::Deref(loc, expr) => match compile_expr(c, consts, names_index, body, expr) {
             ir::Expr::Var(loc, var_id) => ir::Expr::Deref(loc, var_id),
+            ir::Expr::Ref(loc, var_id) => ir::Expr::Var(loc, var_id),
             ir::Expr::StrLit(token) => {
                 let unescape = token.unescape();
                 ir::Expr::CharLit(token.loc, unescape.chars().nth(0).unwrap_or('\0'))

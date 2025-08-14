@@ -277,7 +277,7 @@ impl<'src> std::fmt::Display for Expr<'src> {
 impl Type {
     pub fn size(&self) -> usize {
         match self {
-            Type::Void => todo!("Cannot get size of void"),
+            Type::Void => 0,
             Type::Char => 1,
             Type::SBits(b) | Type::UBits(b) => *b as usize >> 3,
             Type::Array(n, ty) => ty.size() * (*n as usize),
