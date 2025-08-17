@@ -54,10 +54,11 @@ pub fn lower_ast_to_ir<'src>(c: &Compiler<'src>) -> Result<(), ()> {
 
         for v in &module.global_vars {
             let ty = convert_types(&local_name_space, &consts, &v.r#type);
+            let is_vec = matches!(ty, ir::Type::Array(..));
             let uid = c.add_program_global_var(ir::GlobalVar {
                 token: v.name,
-                is_vec: ty.is_array(),
-                ty,
+                is_vec,
+                ty: if is_vec {ty.array_to_ptr_type()} else {ty},
                 value: v
                     .expr
                     .as_ref()

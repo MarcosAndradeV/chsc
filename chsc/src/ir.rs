@@ -291,6 +291,13 @@ impl Type {
     pub fn is_array(&self) -> bool {
         matches!(self, Self::Array(..))
     }
+
+    pub fn array_to_ptr_type(self) -> Type {
+        match self {
+            Self::Array(_ , t) => Self::PtrTo(t),
+            _ => self
+        }
+    }
 }
 
 impl<'src> std::fmt::Display for Type {
