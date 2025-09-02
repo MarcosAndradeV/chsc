@@ -15,5 +15,17 @@
     "sourceLanguages": ["rust"],
     "request": "launch",
     "adapter": "CodeLLDB"
+  },
+  {
+    "label": "Debug chsc in c",
+    "build": {
+      "command": "./nob",
+      "args": []
+    },
+    "program": "$ZED_WORKTREE_ROOT/build/chsc",
+    "args": ["-compile", "dev.md"],
+    "sourceLanguages": ["c"],
+    "request": "launch",
+    "adapter": "GDB"
   }
 ]
