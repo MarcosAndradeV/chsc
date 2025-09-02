@@ -5,7 +5,9 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 #define FLAG_IMPLEMENTATION
-#include "./flag.h"
+#include "flag.h"
+// #define STB_DS_IMPLEMENTATION
+// #include "stb_ds.h"
 
 
 #define try(expr) if(!expr) return false
@@ -29,6 +31,8 @@ typedef enum {
     TOKEN_CLOSE_BRACE,
     TOKEN_MACRO_CALL,
     TOKEN_IDENTIFIER,
+    TOKEN_IMPORT,
+    TOKEN_FN,
     TOKEN_KEYWORD,
     TOKEN_REAL_NUMBER,
     TOKEN_INTEGER_NUMBER,
@@ -83,8 +87,7 @@ typedef struct {
 typedef struct {
     TokenKind kind;
     Loc loc;
-    const char* source;
-    size_t source_len;
+    String_View source;
 } Token;
 
 static String_Builder sources;
@@ -99,6 +102,7 @@ typedef struct {
 void usage(FILE *stream);
 
 bool Lexer_init(Lexer *lex, const char* input_path);
+void Lexer_deinit(Lexer *lex);
 Token Lexer_next(Lexer *lex);
 size_t Lexer_save(Lexer *lex);
 void Lexer_restore(Lexer *lex, size_t pos);
@@ -171,6 +175,13 @@ bool Lexer_init(Lexer *lex, const char* input_path) {
     return true;
 }
 
+void Lexer_deinit(Lexer *lex) {
+    free(lex->source.items);
+    lex->source = (String_Builder){0};
+    lex->pos  = 0;
+    lex->loc = (Loc){0};
+}
+
 void Loc_next(Loc *loc, char ch) {
     switch(ch){
         case '\n': {
@@ -218,49 +229,37 @@ Token Lexer_next(Lexer *lex) {
                 return (Token) {
                     .kind = TOKEN_EOF,
                     .loc = loc,
-                    .source = ""
+                    .source = sv_from_cstr("")
                 };
             case ',':
                 return (Token) {
                     .kind = TOKEN_COMMA,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case ';':
                 return (Token) {
                     .kind = TOKEN_SEMICOLON,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case '(':
                 return (Token) {
                     .kind = TOKEN_OPEN_PAREN,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case ')':
                 return (Token) {
                     .kind = TOKEN_CLOSE_PAREN,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case '{':
                 return (Token) {
                     .kind = TOKEN_OPEN_BRACE,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case '}':
                 return (Token) {
                     .kind = TOKEN_CLOSE_BRACE,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
                 };
             case '"': {
                 for(;;) {
@@ -272,8 +271,7 @@ Token Lexer_next(Lexer *lex) {
                         return (Token){
                             .kind = TOKEN_UNTERMINATED_STRING_LITERAL,
                             .loc = loc,
-                            .source = lex->source.items + begin,
-                            .source_len = lex->pos - begin
+                            .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
                         };
                     } else {
                         Lexer_advance(lex);
@@ -283,8 +281,7 @@ Token Lexer_next(Lexer *lex) {
                 return (Token){
                     .kind = TOKEN_STRING_LITERAL,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
+                    .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
                 };
             } break;
             default: {
@@ -294,20 +291,25 @@ Token Lexer_next(Lexer *lex) {
                         if(isalpha(ch) || ch == '_' || isalnum(ch)) Lexer_advance(lex);
                         else break;
                     }
-
+                    String_View source = sv_from_parts(lex->source.items + begin, lex->pos - begin);
+                    TokenKind kind = TOKEN_IDENTIFIER;
+                    if(sv_eq(source, sv_from_cstr("import"))) {
+                        TokenKind kind = TOKEN_IMPORT;
+                    }
+                    else if(sv_eq(source, sv_from_cstr("fn"))) {
+                        TokenKind kind = TOKEN_FN;
+                    }
                     return (Token){
-                        .kind = TOKEN_IDENTIFIER,
+                        .kind = kind,
                         .loc = loc,
-                        .source = lex->source.items + begin,
-                        .source_len = lex->pos - begin
+                        .source = source,
                     };
                 }
                 if(isspace(ch)) continue;
                 return (Token) {
                     .kind = TOKEN_UNEXPECTED_CHARACTER,
                     .loc = loc,
-                    .source = lex->source.items + begin,
-                    .source_len = lex->pos - begin
+                    .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
                 };
             } break;
         }
@@ -316,7 +318,7 @@ Token Lexer_next(Lexer *lex) {
     return (Token) {
         .kind = TOKEN_EOF,
         .loc = lex->loc,
-        .source = ""
+        .source = sv_from_cstr("")
     };
 }
 
@@ -326,11 +328,22 @@ bool compile_program(const char* input_path) {
     for(;;) {
         Token tk = Lexer_next(&lex);
         if(tk.kind == TOKEN_EOF) break;
-        if(tk.kind == TOKEN_UNEXPECTED_CHARACTER) {
-            printf("%.*s\n", (int)tk.source_len, tk.source);
-            TODO("TOKEN_UNEXPECTED_CHARACTER");
+        // printf("%.*s\n", (int)tk.source_len, tk.source);
+        switch(tk.kind) {
+            case TOKEN_IMPORT: {
+                TODO("TOKEN_IMPORT");
+            } break;
+            case TOKEN_FN: {
+                TODO("TOKEN_FN");
+            } break;
+            case TOKEN_UNEXPECTED_CHARACTER:
+            default: {
+                printf(SV_Fmt"\n", SV_Arg(tk.source));
+                TODO("TOKEN_UNEXPECTED_CHARACTER");
+            } break;
         }
-        printf("%.*s\n", (int)tk.source_len, tk.source);
     }
+
+    Lexer_deinit(&lex);
     return true;
 }
