@@ -14,6 +14,7 @@
 
 /// MACROS
 #define try(expr) if(!expr) return false
+#define defer_try(expr) if(!expr) return_defer(false)
 
 /// CONSTANTS
 #define VERSION "0.1.0"
@@ -88,6 +89,9 @@ typedef struct {
     size_t col;
 } Loc;
 
+#define LOCFmt "%s:%ld:%ld"
+#define LOCArgs(loc) (loc).file_path, (loc).line, (loc).col
+
 typedef struct {
     TokenKind kind;
     Loc loc;
@@ -109,14 +113,31 @@ static LexerT Lexer;
 
 typedef enum {
     OP_BEGIN_FN,
-    OP_PUSH_NUMBER,
+
+    OP_BEGIN_FN_ARGS,
+    OP_END_FN_ARGS,
+
+    OP_BEGIN_BLOCK,
+    OP_END_BLOCK,
+
+    OP_BEGIN_ARGS,
+    OP_END_ARGS,
+
+    OP_PUSH_CALL,
+    OP_PUSH_IDENT,
+    OP_PUSH_STRLIT,
+    OP_PUSH_INTLIT,
+
     OP_PLUS,
 } OpKind;
 
 typedef struct {
     OpKind kind;
-    size_t operand;
     Loc loc;
+    union {
+        size_t operand;
+        String_View literal;
+    };
 } Op;
 
 static struct {
@@ -128,7 +149,11 @@ static struct {
 
 /// GENERAL_FUNCTIONS
 void usage(FILE *stream);
-bool compile_program(const char* input_path);
+bool parse_program(const char* input_path);
+bool parse_args();
+bool parse_body();
+bool parse_call_args();
+bool parse_expression(TokenKind kind);
 void sources_free();
 
 /// LEXER_IMPLEMENTATION
@@ -160,7 +185,7 @@ int main(int argc, char **argv) {
         }
         const char* input_path = shift(rest_argv, rest_argc);
 
-        try(compile_program(input_path));
+        try(parse_program(input_path));
 
         // da_free(sources);
         TODO("-compile");
@@ -263,17 +288,14 @@ TokenKind Lexer_next() {
             case '{': return TOKEN_OPEN_BRACE;
             case '}': return TOKEN_CLOSE_BRACE;
             case '"': {
-                for(;;) {
-                    char ch = Lexer_advance();
-                    if(ch == '"') {
-                        Lexer_advance();
-                        Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
-                        return TOKEN_STRING_LITERAL;
-                    } else if(ch == 0) {
+                for(Lexer_advance(); ch != '"'; ch = Lexer_advance()) {
+                    if(ch == 0) {
                         Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
                         return TOKEN_UNTERMINATED_STRING_LITERAL;
                     }
                 }
+                Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
+                return TOKEN_STRING_LITERAL;
             } break;
             default: {
                 if(isalpha(ch)) {
@@ -313,33 +335,147 @@ TokenKind Lexer_next() {
     return TOKEN_EOF;
 }
 
-bool compile_program(const char* input_path) {
-    try(Lexer_load_file(input_path));
-    for(;;) {
-        TokenKind kind = Lexer_next();
-        if(kind == TOKEN_EOF) break;
+static struct {
+    Op* items;
+    size_t capacity, count;
+} operator_stack;
+static char intlit_buf[32];
+
+bool parse_program(const char* input_path) {
+    bool result = true;
+
+    defer_try(Lexer_load_file(input_path));
+    for(TokenKind kind = Lexer_next(); kind != TOKEN_EOF; kind = Lexer_next()) {
         switch(kind) {
             case TOKEN_IMPORT: {
                 TODO("TOKEN_IMPORT");
             } break;
             case TOKEN_FN: {
-                Ops_append(.kind = OP_BEGIN_FN, .loc = Lexer.loc);
-            } break;
-            case TOKEN_INTEGER_NUMBER: {
-                Ops_append(
-                    .kind = OP_PUSH_NUMBER,
-                    .loc = Lexer.loc,
-                    .operand = strtoul(temp_sv_to_cstr(Lexer.token), NULL, 10)
-                );
-            } break;
-            case TOKEN_PLUS: {
-                Ops_append(.kind = OP_PLUS, .loc = Lexer.loc);
+                TokenKind kind = Lexer_next(); if(kind != TOKEN_IDENTIFIER) TODO("");
+                // TODO: Replace with Arena
+                // const char* name = temp_sv_to_cstr(Lexer.token);
+                Ops_append(.kind = OP_BEGIN_FN, .loc = Lexer.loc, .literal = Lexer.token);
+                defer_try(parse_args());
+                defer_try(parse_body());
             } break;
             case TOKEN_UNEXPECTED_CHARACTER:
             default: {
+                printf("Token(%d): "SV_Fmt"\n", kind, SV_Arg(Lexer.token));
                 TODO("TOKEN_UNEXPECTED_CHARACTER");
             } break;
         }
     }
+
+defer:
+    if(operator_stack.items) da_free(operator_stack);
+    return result;
+}
+
+bool parse_args() {
+    TokenKind kind;
+    kind = Lexer_next(); if(kind != TOKEN_OPEN_PAREN) {
+        printf(LOCFmt": Expect `(`\n", LOCArgs(Lexer.loc));
+        return false;
+    }
+    kind = Lexer_next(); if(kind != TOKEN_CLOSE_PAREN) {
+        printf(LOCFmt": Expect `)`\n", LOCArgs(Lexer.loc));
+        return false;
+    }
     return true;
 }
+
+bool parse_body() {
+    TokenKind kind;
+    kind = Lexer_next(); if(kind != TOKEN_OPEN_BRACE) {
+        printf(LOCFmt": Expect `{`\n", LOCArgs(Lexer.loc));
+        return false;
+    }
+
+    for(TokenKind kind = Lexer_next(); kind != TOKEN_CLOSE_BRACE; kind = Lexer_next()) {
+        switch(kind) {
+            case TOKEN_IDENTIFIER: {
+                Op op = {.kind = OP_PUSH_IDENT, .loc = Lexer.loc, .literal = Lexer.token};
+                kind = Lexer_next();
+                if(kind == TOKEN_OPEN_PAREN) {
+                    op.kind = OP_PUSH_CALL;
+                    da_append(&operator_stack, op);
+                    Ops_append(.kind = OP_BEGIN_ARGS, .loc = Lexer.loc, .literal = Lexer.token);
+                    try(parse_call_args());
+                } else {
+                    da_append(&Ops, op);
+                }
+            } break;
+            case TOKEN_SEMICOLON: {
+                while(operator_stack.count > 0) {
+                    da_append(&Ops, da_last(&operator_stack));
+                    operator_stack.count--;
+                }
+            } break;
+            case TOKEN_UNEXPECTED_CHARACTER:
+            default: {
+                printf(LOCFmt": Token(%d): "SV_Fmt"\n", LOCArgs(Lexer.loc), kind, SV_Arg(Lexer.token));
+                TODO("TOKEN_UNEXPECTED");
+            } break;
+        }
+    }
+
+    return true;
+}
+
+bool parse_call_args() {
+    for(TokenKind kind = Lexer_next(); kind != TOKEN_CLOSE_PAREN; kind = Lexer_next()) {
+        try(parse_expression(kind));
+    }
+    if(operator_stack.count > 0 && da_last(&operator_stack).kind == OP_PUSH_CALL) {
+        Ops_append(.kind = OP_END_ARGS, .loc = Lexer.loc, .literal = Lexer.token);
+        da_append(&Ops, da_last(&operator_stack));
+        operator_stack.count--;
+    } else {
+        printf(LOCFmt": Missmacth `)`: "SV_Fmt"\n", LOCArgs(Lexer.loc), SV_Arg(Lexer.token));
+    }
+    return true;
+}
+
+bool parse_expression(TokenKind kind) {
+    switch(kind) {
+        case TOKEN_IDENTIFIER: {
+            Op op = {.kind = OP_PUSH_IDENT, .loc = Lexer.loc, .literal = Lexer.token};
+            kind = Lexer_next();
+            if(kind == TOKEN_OPEN_PAREN) {
+                op.kind = OP_PUSH_CALL;
+                da_append(&operator_stack, op);
+                Ops_append(.kind = OP_BEGIN_ARGS, .loc = Lexer.loc, .literal = Lexer.token);
+                try(parse_call_args());
+            } else {
+                da_append(&Ops, op);
+            }
+        } break;
+        case TOKEN_STRING_LITERAL: {
+            Ops_append(.kind = OP_PUSH_STRLIT, .loc = Lexer.loc, .literal = Lexer.token);
+        } break;
+        case TOKEN_UNEXPECTED_CHARACTER:
+        default: {
+            printf(LOCFmt": Token(%d): "SV_Fmt"\n", LOCArgs(Lexer.loc), kind, SV_Arg(Lexer.token));
+            TODO("TOKEN_UNEXPECTED");
+        } break;
+    }
+
+    return true;
+}
+
+/*
+case TOKEN_INTEGER_NUMBER: {
+    assert(Lexer.token.count < 19 && "TOKEN_INTEGER_NUMBER is too big");
+    snprintf(intlit_buf, ARRAY_LEN(intlit_buf), SV_Fmt, SV_Arg(Lexer.token));
+    size_t operand = strtoul(intlit_buf, NULL, 10);
+    Ops_append(
+        .kind = OP_PUSH_INTLIT,
+        .loc = Lexer.loc,
+        .operand = operand
+    );
+} break;
+case TOKEN_IDENTIFIER: {
+    TODO("TOKEN_IDENTIFIER");
+} break;
+
+ */
