@@ -23,7 +23,7 @@
       "args": []
     },
     "program": "$ZED_WORKTREE_ROOT/build/chsc",
-    "args": ["-compile", "dev.md"],
+    "args": ["-compile", "temp/temp.chs"],
     "sourceLanguages": ["c"],
     "request": "launch",
     "adapter": "GDB"
