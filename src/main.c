@@ -1,6 +1,9 @@
-
+/// INCLUDES
+#include <assert.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
 #include "nob.h"
@@ -9,13 +12,13 @@
 // #define STB_DS_IMPLEMENTATION
 // #include "stb_ds.h"
 
-
+/// MACROS
 #define try(expr) if(!expr) return false
 
-
+/// CONSTANTS
 #define VERSION "0.1.0"
 
-
+/// LEXER_TYPES
 typedef enum {
     TOKEN_EOF = 0,
     TOKEN_INVALID,
@@ -76,6 +79,7 @@ typedef enum {
     TOKEN_DOLLAR,
     TOKEN_SHIFT_LEFT,
     TOKEN_SHIFT_RIGHT,
+    TOKEN_PUNCT,
 } TokenKind;
 
 typedef struct {
@@ -93,22 +97,47 @@ typedef struct {
 static String_Builder sources;
 
 typedef struct {
-    String_Builder source;
+    String_View source;
     size_t pos;
     Loc loc;
-} Lexer;
+    String_View token;
+} LexerT;
 
+static LexerT Lexer;
 
+/// Ops
+
+typedef enum {
+    OP_BEGIN_FN,
+    OP_PUSH_NUMBER,
+    OP_PLUS,
+} OpKind;
+
+typedef struct {
+    OpKind kind;
+    size_t operand;
+    Loc loc;
+} Op;
+
+static struct {
+    Op *items;
+    size_t capacity, count;
+} Ops;
+
+#define Ops_append(...) da_append(&Ops, ((Op){__VA_ARGS__}))
+
+/// GENERAL_FUNCTIONS
 void usage(FILE *stream);
-
-bool Lexer_init(Lexer *lex, const char* input_path);
-void Lexer_deinit(Lexer *lex);
-Token Lexer_next(Lexer *lex);
-size_t Lexer_save(Lexer *lex);
-void Lexer_restore(Lexer *lex, size_t pos);
-
 bool compile_program(const char* input_path);
+void sources_free();
 
+/// LEXER_IMPLEMENTATION
+bool Lexer_load_file(const char* input_path);
+TokenKind Lexer_next();
+LexerT Lexer_save();
+void Lexer_restore(LexerT pos);
+
+/// MAIN
 int main(int argc, char **argv) {
     bool *compile = flag_bool("compile", false, "Compile program: -compile <file.chs>");
     bool *run = flag_bool("run", false, "Run program: -run <file.chs>");
@@ -133,6 +162,7 @@ int main(int argc, char **argv) {
 
         try(compile_program(input_path));
 
+        // da_free(sources);
         TODO("-compile");
     }
 
@@ -149,8 +179,10 @@ int main(int argc, char **argv) {
         usage(stdout);
         exit(0);
     }
-
 }
+
+
+/// IMPLEMENTATIONS
 
 void usage(FILE *stream){
     fprintf(stream, "Usage: ./chsc <command> <arguments>\n");
@@ -158,28 +190,22 @@ void usage(FILE *stream){
     flag_print_options(stream);
 }
 
-bool Lexer_init(Lexer *lex, const char* input_path) {
-    size_t capacity = sources.capacity;
+void sources_free() {
+    da_free(sources);
+}
+
+bool Lexer_load_file(const char* input_path) {
     size_t count = sources.count;
     char* items = sources.items;
     try(read_entire_file(input_path, &sources));
-    lex->source.items = (char*)((size_t)items + sources.items);
-    lex->source.count = (count - sources.count);
-    lex->source.capacity = (capacity - sources.capacity);
-    lex->pos  = 0;
-    lex->loc = (Loc){
+    Lexer.source = sv_from_parts((char*)((size_t)items + sources.items), (count - sources.count));
+    Lexer.pos  = 0;
+    Lexer.loc = (Loc){
         .file_path = input_path,
         .col = 1,
         .line = 1,
     };
     return true;
-}
-
-void Lexer_deinit(Lexer *lex) {
-    free(lex->source.items);
-    lex->source = (String_Builder){0};
-    lex->pos  = 0;
-    lex->loc = (Loc){0};
 }
 
 void Loc_next(Loc *loc, char ch) {
@@ -198,152 +224,122 @@ void Loc_next(Loc *loc, char ch) {
     }
 }
 
-static inline char Lexer_read_char(Lexer *lex) {
-    size_t pos = lex->pos;
-    return pos <= lex->source.count ? lex->source.items[pos] : 0;
+static inline char Lexer_read_char() {
+    size_t pos = Lexer.pos;
+    return pos < Lexer.source.count ? Lexer.source.data[pos] : 0;
 }
 
-static inline char Lexer_advance(Lexer *lex) {
-    char ch = Lexer_read_char(lex);
-    lex->pos += 1;
-    Loc_next(&lex->loc, ch);
+static inline char Lexer_advance() {
+    char ch = Lexer_read_char();
+    Lexer.pos += 1;
+    Loc_next(&Lexer.loc, ch);
     return ch;
 }
 
-size_t Lexer_save(Lexer *lex) {
-    return lex->pos;
+LexerT Lexer_save() {
+    return Lexer;
 }
 
-void Lexer_restore(Lexer *lex, size_t pos) {
-    lex->pos = pos;
+void Lexer_restore(LexerT savepoint) {
+    Lexer = savepoint;
 }
 
-Token Lexer_next(Lexer *lex) {
-    while(lex->pos <= lex->source.count) {
-        size_t begin = lex->pos;
-        char ch = Lexer_advance(lex);
-        Loc loc = lex->loc;
+TokenKind Lexer_next() {
+    while(Lexer.pos <= Lexer.source.count) {
+        size_t begin = Lexer.pos;
+        char ch = Lexer_advance();
+        Lexer.token = nob_sv_from_cstr("");
 
         switch (ch) {
-            case 0:
-                return (Token) {
-                    .kind = TOKEN_EOF,
-                    .loc = loc,
-                    .source = sv_from_cstr("")
-                };
-            case ',':
-                return (Token) {
-                    .kind = TOKEN_COMMA,
-                    .loc = loc,
-                };
-            case ';':
-                return (Token) {
-                    .kind = TOKEN_SEMICOLON,
-                    .loc = loc,
-                };
-            case '(':
-                return (Token) {
-                    .kind = TOKEN_OPEN_PAREN,
-                    .loc = loc,
-                };
-            case ')':
-                return (Token) {
-                    .kind = TOKEN_CLOSE_PAREN,
-                    .loc = loc,
-                };
-            case '{':
-                return (Token) {
-                    .kind = TOKEN_OPEN_BRACE,
-                    .loc = loc,
-                };
-            case '}':
-                return (Token) {
-                    .kind = TOKEN_CLOSE_BRACE,
-                    .loc = loc,
-                };
+            case 0: return TOKEN_EOF;
+            case '#': {
+                for(; ch != '\n'; ch = Lexer_advance()) {}
+            } break;
+            case ',': return TOKEN_COMMA;
+            case '+': return TOKEN_PLUS;
+            case ';': return TOKEN_SEMICOLON;
+            case '(': return TOKEN_OPEN_PAREN;
+            case ')': return TOKEN_CLOSE_PAREN;
+            case '{': return TOKEN_OPEN_BRACE;
+            case '}': return TOKEN_CLOSE_BRACE;
             case '"': {
                 for(;;) {
-                    char ch = Lexer_read_char(lex);
+                    char ch = Lexer_advance();
                     if(ch == '"') {
-                        Lexer_advance(lex);
-                        break;
+                        Lexer_advance();
+                        Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
+                        return TOKEN_STRING_LITERAL;
                     } else if(ch == 0) {
-                        return (Token){
-                            .kind = TOKEN_UNTERMINATED_STRING_LITERAL,
-                            .loc = loc,
-                            .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
-                        };
-                    } else {
-                        Lexer_advance(lex);
+                        Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
+                        return TOKEN_UNTERMINATED_STRING_LITERAL;
                     }
                 }
-
-                return (Token){
-                    .kind = TOKEN_STRING_LITERAL,
-                    .loc = loc,
-                    .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
-                };
             } break;
             default: {
                 if(isalpha(ch)) {
                     for(;;) {
-                        char ch = Lexer_read_char(lex);
-                        if(isalpha(ch) || ch == '_' || isalnum(ch)) Lexer_advance(lex);
+                        char ch = Lexer_read_char();
+                        if(isalpha(ch) || ch == '_' || isalnum(ch)) Lexer_advance();
                         else break;
                     }
-                    String_View source = sv_from_parts(lex->source.items + begin, lex->pos - begin);
+                    String_View token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
                     TokenKind kind = TOKEN_IDENTIFIER;
-                    if(sv_eq(source, sv_from_cstr("import"))) {
-                        TokenKind kind = TOKEN_IMPORT;
+                    if(sv_eq(token, sv_from_cstr("import"))) {
+                        kind = TOKEN_IMPORT;
                     }
-                    else if(sv_eq(source, sv_from_cstr("fn"))) {
-                        TokenKind kind = TOKEN_FN;
+                    else if(sv_eq(token, sv_from_cstr("fn"))) {
+                        kind = TOKEN_FN;
                     }
-                    return (Token){
-                        .kind = kind,
-                        .loc = loc,
-                        .source = source,
-                    };
+                    Lexer.token = token;
+                    return kind;
+                } else if(isspace(ch)) {
+                    continue;
+                } else if(isalnum(ch)) {
+                    for(;;) {
+                        char ch = Lexer_read_char();
+                        if(isalnum(ch)) Lexer_advance();
+                        else break;
+                    }
+                    Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
+                    return TOKEN_INTEGER_NUMBER;
+                } else {
+                    Lexer.token = sv_from_parts(Lexer.source.data + begin, Lexer.pos - begin);
+                    return TOKEN_UNEXPECTED_CHARACTER;
                 }
-                if(isspace(ch)) continue;
-                return (Token) {
-                    .kind = TOKEN_UNEXPECTED_CHARACTER,
-                    .loc = loc,
-                    .source = sv_from_parts(lex->source.items + begin, lex->pos - begin),
-                };
             } break;
         }
     }
 
-    return (Token) {
-        .kind = TOKEN_EOF,
-        .loc = lex->loc,
-        .source = sv_from_cstr("")
-    };
+    return TOKEN_EOF;
 }
 
 bool compile_program(const char* input_path) {
-    Lexer lex = {0};
-    try(Lexer_init(&lex, input_path));
+    try(Lexer_load_file(input_path));
     for(;;) {
-        Token tk = Lexer_next(&lex);
-        if(tk.kind == TOKEN_EOF) break;
-        // printf("%.*s\n", (int)tk.source_len, tk.source);
-        switch(tk.kind) {
+        TokenKind kind = Lexer_next();
+        if(kind == TOKEN_EOF) break;
+        switch(kind) {
             case TOKEN_IMPORT: {
                 TODO("TOKEN_IMPORT");
             } break;
             case TOKEN_FN: {
-                TODO("TOKEN_FN");
+                Ops_append(.kind = OP_BEGIN_FN, .loc = Lexer.loc);
+            } break;
+            case TOKEN_INTEGER_NUMBER: {
+                Ops_append(
+                    .kind = OP_PUSH_NUMBER,
+                    .loc = Lexer.loc,
+                    .operand = strtoul(temp_sv_to_cstr(Lexer.token), NULL, 10)
+                );
+            } break;
+            case TOKEN_PLUS: {
+                Ops_append(.kind = OP_PLUS, .loc = Lexer.loc);
             } break;
             case TOKEN_UNEXPECTED_CHARACTER:
             default: {
-                printf(SV_Fmt"\n", SV_Arg(tk.source));
                 TODO("TOKEN_UNEXPECTED_CHARACTER");
             } break;
         }
     }
-
-    Lexer_deinit(&lex);
     return true;
 }
