@@ -3,6 +3,8 @@
 > [!WARNING]
 > The Compiler is not fully implemented yet.
 
+Previous version https://github.com/MarcosAndradeV/chs-lang
+
 ## Dependencies
 
 - [Rust](https://www.rust-lang.org/) and Cargo.
