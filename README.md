@@ -6,7 +6,7 @@
 ## Dependencies
 
 - [Rust](https://www.rust-lang.org/) and Cargo.
-- [FASM](https://flatassembler.net/) or [GCC](https://gcc.gnu.org/).
+- [FASM](https://flatassembler.net/).
 
 ## Quick Start
 
